@@ -1,0 +1,6 @@
+[submodule "dependencies/xed"]
+	path = dependencies/xed
+	url = https://github.com/intelxed/xed.git
+[submodule "dependencies/mbuild"]
+	path = dependencies/mbuild
+	url = https://github.com/intelxed/mbuild.git
