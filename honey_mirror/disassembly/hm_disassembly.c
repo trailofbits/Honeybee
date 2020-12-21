@@ -148,7 +148,12 @@ bool hm_disassembly_get_blocks_from_elf(const char *path, hm_disassembly_block_i
             uint32_t insn_length = xed_decoded_inst_get_length(&xedd);
 
             if (is_qualifying_cofi(&xedd)) {
-                uint64_t cofi_destination = xed_decoded_inst_get_branch_displacement(&xedd);
+                int32_t branch_displacement = xed_decoded_inst_get_branch_displacement(&xedd);
+                uint64_t cofi_destination = UINT64_MAX;
+                if (branch_displacement) {
+                    cofi_destination = insn_va + insn_length + branch_displacement;
+                }
+
                 block.opcode = xed_decoded_inst_get_iclass(&xedd);
                 block.start_offset = block_start;
                 block.length = (uint32_t) (insn_va - block_start);
