@@ -6,6 +6,7 @@
  * This file provides tools for analyzing ELF binaries using Intel XED
  */
 
+#include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
@@ -53,7 +54,7 @@ bool is_qualifying_cofi(xed_decoded_inst_t *xedd) {
 }
 
 
-bool hm_disassembly_get_blocks_from_elf(const char *path, hm_disassembly_block_iterator block_iterator) {
+bool hm_disassembly_get_blocks_from_elf(const char *path, hm_disassembly_block **blocks, int64_t *blocks_count) {
     int fd = 0;
     void *map_handle = NULL;
     bool success = false;
@@ -113,6 +114,14 @@ bool hm_disassembly_get_blocks_from_elf(const char *path, hm_disassembly_block_i
     dstate.mmode = XED_MACHINE_MODE_LONG_64;
     hm_disassembly_block block;
 
+    size_t blocks_capacity = 16;
+    int64_t blocks_write_index = 0;
+    hm_disassembly_block *_blocks = malloc(sizeof(hm_disassembly_block) * blocks_capacity);
+    if (!_blocks) {
+        printf(TAG "Out of memory!\n");
+        success = false;
+        goto CLEANUP;
+    }
 
     //Walk each section
     for (int i = 0; i < header->e_shnum; i++) {
@@ -160,7 +169,19 @@ bool hm_disassembly_get_blocks_from_elf(const char *path, hm_disassembly_block_i
                 block.last_instruction_size = insn_length;
                 block.cofi_destination = cofi_destination;
 
-                block_iterator(&block);
+                if (blocks_write_index >= blocks_capacity) {
+                    blocks_capacity *= 2;
+                    hm_disassembly_block *new_blocks = realloc(_blocks, sizeof(hm_disassembly_block) * blocks_capacity);
+                    if (!new_blocks) {
+                        printf(TAG "Out of memory!\n");
+                        success = false;
+                        goto CLEANUP;
+                    }
+
+                    _blocks = new_blocks;
+                }
+
+                memcpy(&_blocks[blocks_write_index++], &block, sizeof(hm_disassembly_block));
 
                 block_start = insn_va + insn_length;
             }
@@ -170,6 +191,8 @@ bool hm_disassembly_get_blocks_from_elf(const char *path, hm_disassembly_block_i
     }
 
     success = true;
+    *blocks = _blocks;
+    *blocks_count = blocks_write_index; //the next write index IS the count!
 
     CLEANUP:
     if (map_handle) {
@@ -178,6 +201,12 @@ bool hm_disassembly_get_blocks_from_elf(const char *path, hm_disassembly_block_i
 
     if (fd) {
         close(fd);
+    }
+
+    if (!success) {
+        if (_blocks) {
+            free(_blocks);
+        }
     }
 
     return success;

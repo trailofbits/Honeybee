@@ -1,4 +1,5 @@
 #Fetch submodules
+git submodule init
 git submodule update --remote
 
 cd xed

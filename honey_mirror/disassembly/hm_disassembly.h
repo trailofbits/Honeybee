@@ -6,6 +6,7 @@
 #define HONEY_MIRROR_HM_DISASSEMBLY_H
 
 #include <stdbool.h>
+#include <stdint.h>
 
 /**
  * Represents a single basic block in a binary
@@ -19,18 +20,13 @@ typedef struct {
 } hm_disassembly_block;
 
 /**
- * A function which can be used to iterate basic blocks inside of a binary
- */
-typedef void (^hm_disassembly_block_iterator)(hm_disassembly_block *block);
-
-/**
  * Iterates the basic blocks inside of an ELF binary
  * @param path The path to the ELF binary
- * @param block_iterator The iterator block to call with each block. Note, the parameter to this function is NOT
- * owned by the iterator and may be destroyed immediately after the iterator returns.
+ * @param blocks The location to place a pointer to a buffer of blocks. You are responsible for freeing this buffer.
+ * @param blocks_count The location to place the number of blocks in the blocks buffer
  * @return true on success
  */
-bool hm_disassembly_get_blocks_from_elf(const char *path, hm_disassembly_block_iterator block_iterator);
+bool hm_disassembly_get_blocks_from_elf(const char *path, hm_disassembly_block **blocks, int64_t *blocks_count);
 
 
 #endif //HONEY_MIRROR_HM_DISASSEMBLY_H
