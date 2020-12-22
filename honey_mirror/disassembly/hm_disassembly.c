@@ -154,7 +154,7 @@ bool hm_disassembly_get_blocks_from_elf(const char *path, hm_disassembly_block_i
                     cofi_destination = insn_va + insn_length + branch_displacement;
                 }
 
-                block.opcode = xed_decoded_inst_get_iclass(&xedd);
+                block.instruction_category = xed_decoded_inst_get_category(&xedd);
                 block.start_offset = block_start;
                 block.length = (uint32_t) (insn_va - block_start);
                 block.last_instruction_size = insn_length;

@@ -15,7 +15,7 @@ typedef struct {
     uint64_t cofi_destination;
     uint32_t length;
     uint16_t last_instruction_size;
-    uint16_t opcode;
+    uint16_t instruction_category;
 } hm_disassembly_block;
 
 /**
