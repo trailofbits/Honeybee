@@ -4,4 +4,10 @@ git submodule update --remote
 
 cd xed
 ./mfile.py &&
-echo "Built xed"
+	echo "Built xed"
+
+cd ../
+cd libipt
+cmake -DBUILD_SHARED_LIBS=0 . &&
+	make &&
+	echo "Built libipt"

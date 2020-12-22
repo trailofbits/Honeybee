@@ -4,3 +4,6 @@
 [submodule "dependencies/mbuild"]
 	path = dependencies/mbuild
 	url = https://github.com/intelxed/mbuild.git
+[submodule "dependencies/libipt"]
+	path = dependencies/libipt
+	url = https://github.com/intel/libipt.git
