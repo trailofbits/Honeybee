@@ -40,6 +40,7 @@ int hm_code_generator_generate(const hm_disassembly_block *sorted_blocks, int64_
 
     //Write out the asm header
     fprintf(fp,
+            ".intel_syntax noprefix\n"
             ".text\n"
             ".globl _block_decode\n"
             "_log_coverage:\n"

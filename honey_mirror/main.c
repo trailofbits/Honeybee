@@ -13,7 +13,7 @@ int main() {
         abort();
     }
 
-    hm_code_generator_generate(blocks, block_count, "/tmp/test.s");
+    hm_code_generator_generate(blocks, block_count, "/home/allison/Desktop/test.s");
 
     free(blocks);
 
