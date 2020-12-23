@@ -9,9 +9,9 @@ target_include_directories(honey_mirror PRIVATE ${CMAKE_SOURCE_DIR}/dependencies
 target_link_libraries(honey_mirror ${CMAKE_SOURCE_DIR}/dependencies/xed/obj/libxed.a)
 
 project(honey_analyzer C ASM)
-#set_property(SOURCE ../test.s PROPERTY LANGUAGE C)
 add_executable(honey_analyzer
         honey_analyzer/main.c
+        honey_analyzer/trace_analysis/trace_utils.asm
         ../test.s
         )
 target_compile_options(honey_analyzer PRIVATE -masm=intel)

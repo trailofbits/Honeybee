@@ -32,12 +32,11 @@ static void intel_xed_init() {
 
 /**
  * Is this instruction a Processor Trace qualifying change-of-flow-instruction?
- * @param xedd The decoded instruction
+ * @param category The category of the instruction
  * @return True if this is a COFI instruction
  */
 __attribute((always_inline))
-bool is_qualifying_cofi(xed_decoded_inst_t *xedd) {
-    xed_category_enum_t category = xed_decoded_inst_get_category(xedd);
+bool is_qualifying_cofi(xed_category_enum_t category) {
     switch (category) {
         case XED_CATEGORY_COND_BR:
         case XED_CATEGORY_UNCOND_BR:
@@ -155,15 +154,18 @@ bool hm_disassembly_get_blocks_from_elf(const char *path, hm_disassembly_block *
             }
 
             uint32_t insn_length = xed_decoded_inst_get_length(&xedd);
-
-            if (is_qualifying_cofi(&xedd)) {
+            xed_category_enum_t category = xed_decoded_inst_get_category(&xedd);
+            if (is_qualifying_cofi(category)) {
                 int32_t branch_displacement = xed_decoded_inst_get_branch_displacement(&xedd);
                 uint64_t cofi_destination = UINT64_MAX;
-                if (branch_displacement) {
+                if (branch_displacement
+                    || ((category == XED_CATEGORY_UNCOND_BR || category == XED_CATEGORY_COND_BR)) &&
+                       xed_decoded_inst_number_of_memory_operands(&xedd) == 0) {
                     cofi_destination = insn_va + insn_length + branch_displacement;
                 }
 
-                block.instruction_category = xed_decoded_inst_get_category(&xedd);
+
+                block.instruction_category = category;
                 block.start_offset = block_start;
                 block.length = (uint32_t) (insn_va - block_start);
                 block.last_instruction_size = insn_length;

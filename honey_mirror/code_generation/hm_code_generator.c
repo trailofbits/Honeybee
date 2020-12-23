@@ -42,30 +42,21 @@ int hm_code_generator_generate(const hm_disassembly_block *sorted_blocks, int64_
     fprintf(fp,
             ".intel_syntax noprefix\n"
             ".text\n"
-            ".globl _block_decode\n"
-            "_log_coverage:\n"
-            "\t//We're cheating here and violating CC, the IP is in callee saved r12\n"
-            "\tret\n"
-            "\n"
-            "_should_take_conditional:\n"
-            "\t//We're cheating here and violating CC and intentionally dumping a test result down\n"
-            "\ttest rax, rax\n"
-            "\tret\n"
-            "\n"
-            "_get_indirect_branch:\n"
-            "\t//We're cheating here and violating CC, the IP is in callee saved r12\n"
-            "\txor rax, rax #return the PC to jump to\n"
-            "\txor r12, r12 #update the IP\n"
-            "\tret\n"
+            ".globl _block_decode, _block_decode_CLEANUP, _unslid_virtual_ip_to_text, "
+            "_unslid_virtual_ip_to_text_count\n"
             "_block_decode:\n"
             "\t#Epilogue\n"
             "\tsub  rsp, 16\n"
-            "\tmov [rsp + 0], r12 #IP\n");
+            "\tmov [rsp + 0], r12 #IP\n"
+            "\tmov r12, rsi #Stash IP\n"
+            "\t//Jump to the starting point (pass rsi through)\n"
+            "\tcall table_search_ip\n"
+            "\tjmp rax\n\n"
+    );
 
     for (int64_t i = 0; i < block_count; i++) {
         const hm_disassembly_block *block = sorted_blocks + i;
 
-//        snprintf(block_label_buffer, sizeof(block_label_buffer), "\t_%p:\n", (void *)block->start_offset);
         //Write out the block header (which logs coverage
         fprintf(fp,
                 "\t_%p:\n" //This block's label
@@ -76,11 +67,7 @@ int hm_code_generator_generate(const hm_disassembly_block *sorted_blocks, int64_
         if (block->cofi_destination == UINT64_MAX
         || (next_block_i = lookup_block_sorted(sorted_blocks, block_count, block->cofi_destination)) == -1) {
             //We don't have a known next-IP, use the any-jump
-            fprintf(fp,
-                    "\t\tcall _get_indirect_branch\n"
-                    /* we don't need to update r12 because we violated CC */
-                    "\t\tjmp rax\n"
-                    );
+            fprintf(fp, "\t\tjmp _take_indirect_branch\n");
         } else if (block->instruction_category == XED_CATEGORY_COND_BR) {
             void *not_taken = (void *)(block->start_offset + block->length + block->last_instruction_size);
             void *taken = (void *)sorted_blocks[next_block_i].start_offset;
@@ -98,16 +85,44 @@ int hm_code_generator_generate(const hm_disassembly_block *sorted_blocks, int64_
             fprintf(fp,
                     "\t\tmov r12, %p\n"
                     "\t\tjmp _%p\n",
-                    (void *)block->cofi_destination, taken);
+                    (void *) block->cofi_destination, taken);
         }
     }
-    
+
     //Write the epilogue
     fprintf(fp,
+            "\t\t_block_decode_CLEANUP:"
             "\t#Prologue\n"
             "\tmov r12, [rsp + 0]\n"
             "\tadd rsp, 16\n"
-            "\tret\n");
+            "\tret\n\n");
+
+    /* write the floor unslide-ip to label data table */
+
+    fprintf(fp, ".rodata\n"
+                "_unslid_virtual_ip_to_text_count:\n"
+                ".quad %p\n"
+                "_unslid_virtual_ip_to_text:\n",
+            (void *) block_count);
+    for (int64_t i = 0; i < block_count; i++) {
+        const hm_disassembly_block *block = sorted_blocks + i;
+        fprintf(fp,
+                ".quad %p\n"
+                ".quad _%p\n",
+                (void *) block->start_offset,
+                (void *) block->start_offset);
+    }
+
+    //Add a final entry with max values
+    //We do this so that we can safely lookup the ""size"" of any entry without doing a bounds check
+    //The last entry will just be ridiculously large, but this doesn't matter since we use this to floor
+    fprintf(fp,
+            ".quad %p\n"
+            ".quad %p\n",
+            (void *) UINT64_MAX,
+            (void *) UINT64_MAX);
+
+    fclose(fp);
 
     return 0;
 }
