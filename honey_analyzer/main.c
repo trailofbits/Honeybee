@@ -16,7 +16,6 @@
 extern void block_decode(uint64_t unslid_ip) asm ("_block_decode");
 
 void log_coverage(void) asm ("_log_coverage");
-
 void log_coverage(void) {
     /* EVIL HACKS:
      * We're violating sys-v calling convention for to avoid needing to bloat the text segment of the decode loop
@@ -95,7 +94,7 @@ int take_indirect_branch_c(uint64_t *unslid_ip, uint64_t *next_code_location) {
     return 0;
 }
 
-int should_take_conditional_c(uint64_t *unslid_ip, uint64_t *next_code_location_or_null) {
+int take_conditional_c(uint64_t *unslid_ip, uint64_t *next_code_location_or_null) {
     int status;
     int taken = -1;
     uint64_t old = *unslid_ip;
@@ -120,11 +119,8 @@ int should_take_conditional_c(uint64_t *unslid_ip, uint64_t *next_code_location_
 
 int main() {
 
-    int errcode;
-
     int fd = 0;
     void *map_handle = NULL;
-    bool success = false;
 
     fd = open("/tmp/trace/ptout.3", O_RDONLY);
     struct pt_config config;
@@ -158,7 +154,7 @@ int main() {
     }
     printf("Trace init complete!\n");
 
-    block_decode(ip);
+    block_decode(ip - binary_slide);
     printf("decode done\n");
 
 

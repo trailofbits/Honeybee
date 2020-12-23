@@ -111,7 +111,6 @@ bool hm_disassembly_get_blocks_from_elf(const char *path, hm_disassembly_block *
     xed_decoded_inst_t xedd;
     xed_state_t dstate;
     dstate.mmode = XED_MACHINE_MODE_LONG_64;
-    hm_disassembly_block block;
 
     size_t blocks_capacity = 16;
     int64_t blocks_write_index = 0;
@@ -159,17 +158,11 @@ bool hm_disassembly_get_blocks_from_elf(const char *path, hm_disassembly_block *
                 int32_t branch_displacement = xed_decoded_inst_get_branch_displacement(&xedd);
                 uint64_t cofi_destination = UINT64_MAX;
                 if (branch_displacement
+                    /* allow branches with no displacement (step over) if they aren't loading the target from mem */
                     || ((category == XED_CATEGORY_UNCOND_BR || category == XED_CATEGORY_COND_BR)) &&
                        xed_decoded_inst_number_of_memory_operands(&xedd) == 0) {
                     cofi_destination = insn_va + insn_length + branch_displacement;
                 }
-
-
-                block.instruction_category = category;
-                block.start_offset = block_start;
-                block.length = (uint32_t) (insn_va - block_start);
-                block.last_instruction_size = insn_length;
-                block.cofi_destination = cofi_destination;
 
                 if (blocks_write_index >= blocks_capacity) {
                     blocks_capacity *= 2;
@@ -183,7 +176,12 @@ bool hm_disassembly_get_blocks_from_elf(const char *path, hm_disassembly_block *
                     _blocks = new_blocks;
                 }
 
-                memcpy(&_blocks[blocks_write_index++], &block, sizeof(hm_disassembly_block));
+                hm_disassembly_block *block = &_blocks[blocks_write_index++];
+                block->instruction_category = category;
+                block->start_offset = block_start;
+                block->length = (uint32_t) (insn_va - block_start);
+                block->last_instruction_size = insn_length;
+                block->cofi_destination = cofi_destination;
 
                 block_start = insn_va + insn_length;
             }

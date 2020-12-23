@@ -46,9 +46,14 @@ int hm_code_generator_generate(const hm_disassembly_block *sorted_blocks, int64_
             "_unslid_virtual_ip_to_text_count\n"
             "_block_decode:\n"
             "\t#Epilogue\n"
-            "\tsub  rsp, 16\n"
+            "\tsub  rsp, 32\n"
             "\tmov [rsp + 0], r12 #IP\n"
-            "\tmov r12, rsi #Stash IP\n"
+            "\t/* These registers are used for the _take_conditional thunk */\n"
+            "\tmov [rsp + 8], r13 #Taken jump address\n"
+            "\tmov [rsp + 16], r14 #Not-taken fallthrough jump address\n"
+            "\tmov [rsp + 24], rbx #Taken virtual IP\n"
+
+            "\tmov r12, rdi #Stash IP\n"
             "\t//Jump to the starting point (pass rsi through)\n"
             "\tcall table_search_ip\n"
             "\tjmp rax\n\n"
@@ -72,13 +77,14 @@ int hm_code_generator_generate(const hm_disassembly_block *sorted_blocks, int64_
             void *not_taken = (void *)(block->start_offset + block->length + block->last_instruction_size);
             void *taken = (void *)sorted_blocks[next_block_i].start_offset;
             fprintf(fp,
-                    "\t\tcall _should_take_conditional\n"
-                    "\t\tmov r12, %p\n"
-                    "\t\tjz _%p\n" //not taken
-                    "\t\tmov r12, %p\n"
-                    "\t\tjmp _%p\n", //taken
-                    not_taken, not_taken,
-                    (void *)block->cofi_destination, taken);
+                    "\t\tlea r13, _%p\n"
+                    "\t\tlea r14, _%p_fallthrough\n"
+                    "\t\tmov rbx, %p\n"
+                    "\t\tjmp _take_conditional\n"
+                    "\t_%p_fallthrough:\n"
+                    "\t\tmov r12, %p\n",
+                    taken, (void *) block->start_offset, (void *) block->cofi_destination,
+                    (void *) block->start_offset, not_taken);
         } else {
             //We have an unconditional branch. This means we KNOW our target
             void *taken = (void *)sorted_blocks[next_block_i].start_offset;
@@ -94,7 +100,10 @@ int hm_code_generator_generate(const hm_disassembly_block *sorted_blocks, int64_
             "\t\t_block_decode_CLEANUP:"
             "\t#Prologue\n"
             "\tmov r12, [rsp + 0]\n"
-            "\tadd rsp, 16\n"
+            "\tmov r13, [rsp + 8]\n"
+            "\tmov r14, [rsp + 16]\n"
+            "\tmov rbx, [rsp + 24]\n"
+            "\tadd rsp, 32\n"
             "\tret\n\n");
 
     /* write the floor unslide-ip to label data table */

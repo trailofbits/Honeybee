@@ -4,7 +4,7 @@ LOG_COVERAGE_PRINTF: .asciz "ip = %p\n"
 BLOCK_ABORT_PRINTF: .asciz "Bad status code: %d\n"
 
 .text
-.globl /*_log_coverage,*/ _should_take_conditional, _take_indirect_branch
+.globl /*_log_coverage,*/ _take_conditional, _take_indirect_branch
 
 /*
 _log_coverage:
@@ -16,16 +16,30 @@ _log_coverage:
 	ret
 */
 
-_should_take_conditional:
+/*
+A thunk which routes flow to the correct branch direction
+Expectations
+    IN
+        r12: Virtual IP
+        r13: The __TEXT address to jump to if we took the branch in the trace
+        r14: The __TEXT fallthrough address to jump to if we DID NOT take the branch in the trace.
+            This address should set r12 to the appropriate fallthrough value
+        rbx: The virtual IP if the branch is taken
+     OUT:
+        rip: If the branch was taken, this thunk routes to the next decoder function (same for not-taken)
+            If the trace reports an IP update, however, neither branch will be taken and instead decoding will resume
+            at the correct decoding function.
+        r12: Updates to the current virtual address after routing
+*/
+_take_conditional:
     sub rsp, 16
 
-    mov rdi, rsp
-    mov [rsp], r12 //ptr to unslid_ip
-    mov rsi, rsp
-    add rsi, 8
-    xor rax, rax
-    mov [rsi], rax //ptr to override next_code_location
-    call should_take_conditional_c
+    mov [rsp], r12
+    mov rdi, rsp //ptr to unslid_ip
+
+    mov DWORD PTR[rsp + 8], 0
+    lea rsi, [rsp + 8] //ptr to override next_code_location
+    call take_conditional_c
 
     mov r12, [rsp] //unpack our new unslid_ip
     mov r11, [rsp + 8] //unpack our next_code_location
@@ -33,32 +47,23 @@ _should_take_conditional:
     add rsp, 16
 
     test ax, ax
-    js _block_decode_abort_2 //check for a negative error
+    js _block_decode_abort //A negative return code (instead of 0/1 or NT/T) is an abort
 
+    //Now we need to decide which of the three address we want to jump to and how we want to update the virtual IP
+    test r11, r11 //Check if our IP changes as a result of an in-flight event
+    jnz _take_conditional_INFLIGHT_EVENT
 
-    test r11, r11
-    jnz _should_take_conditional_ROP //Check if our IP changed as a result of an in-flight event
-
-    //We're good to go. Leak the test result out of the procedure so the branch is set correctly
+    //If we're here, we didn't have an in-flight IP update.
     test ax, ax
-    ret
+    mov rax, r13 #Taken address -- assume we took the branch
+    cmovz rax, r14 #Not-taken address -- and replace it we we assumed wrong
+    mov r12, rbx //Move the taken virtual IP into our IP slot. If we end up jumping to fallthrough it'll be reset anyways
+    jmp rax
 
-    //FIXME: Restructure this so we aren't literally using a rop here
-    _should_take_conditional_ROP:
-    //Since the IP changed as we were decoding, we ignore this T/NT result and resume at the IP of the last event
-    //I structured this poorly and so since this is a function call we need to cheat and redirect execution to the
-    //correct/new function call rather than resuming the old one
-
-    /* SOLUTION!!! Re-build the code generator so that it passes the two choices on caller saved registers. This means
-    we don't return at all and this is just another thunk */
-    mov [rsp], r11
-    ret
-
-    _block_decode_abort_2:
-    //FIXME: Apply above solution, same hack
-    lea r11, _block_decode_abort
-    mov [rsp], r11
-    ret
+    _take_conditional_INFLIGHT_EVENT:
+    //We already unpacked unslid_ip (which the C code updated for us) so we just need our jump addr
+    mov rax, r11
+    jmp rax
 
 
 /*
@@ -76,8 +81,7 @@ _take_indirect_branch:
 
     mov [rsp], r12
     mov rdi, rsp
-    mov rsi, rsp
-    add rsi, 8
+    lea rsi, [rsp + 8]
     call take_indirect_branch_c
     mov r12, [rsp + 0]
     mov rdi, [rsp + 8]
@@ -89,11 +93,13 @@ _take_indirect_branch:
     jmp rdi
 
 
+/*
+Thunk which displays an error code from RAX and then tears down block_decode
+*/
 _block_decode_abort:
     lea rdi, BLOCK_ABORT_PRINTF
     mov rsi, rax //status code
     xor rax, rax
     call printf
 
-    /* since we are still technically TCO, we need to use the block decode cleanup otherwise the stack is broken */
     jmp _block_decode_CLEANUP
