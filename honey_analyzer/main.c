@@ -52,6 +52,7 @@ int handle_events(int status, uint64_t *unslid_ip) {
 extern uint64_t _unslid_virtual_ip_to_text_START asm("_unslid_virtual_ip_to_text");
 extern uint64_t _unslid_virtual_ip_to_text_count asm("_unslid_virtual_ip_to_text_count");
 
+uint64_t table_search_ip(uint64_t unslid_ip) asm("_table_search_ip");
 uint64_t table_search_ip(uint64_t unslid_ip) {
     uint64_t *_unslid_virtual_ip_to_text = &_unslid_virtual_ip_to_text_START;
 
@@ -74,7 +75,7 @@ uint64_t table_search_ip(uint64_t unslid_ip) {
     return 0;
 }
 
-
+int take_indirect_branch_c(uint64_t *unslid_ip, uint64_t *next_code_location) asm("_take_indirect_branch_c");
 int take_indirect_branch_c(uint64_t *unslid_ip, uint64_t *next_code_location) {
     int status;
     uint64_t old = *unslid_ip;

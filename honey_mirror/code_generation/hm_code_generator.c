@@ -55,7 +55,7 @@ int hm_code_generator_generate(const hm_disassembly_block *sorted_blocks, int64_
 
             "\tmov r12, rdi #Stash IP\n"
             "\t//Jump to the starting point (pass rsi through)\n"
-            "\tcall table_search_ip\n"
+            "\tcall _table_search_ip\n"
             "\tjmp rax\n\n"
     );
 
@@ -77,8 +77,8 @@ int hm_code_generator_generate(const hm_disassembly_block *sorted_blocks, int64_
             void *not_taken = (void *)(block->start_offset + block->length + block->last_instruction_size);
             void *taken = (void *)sorted_blocks[next_block_i].start_offset;
             fprintf(fp,
-                    "\t\tlea r13, _%p\n"
-                    "\t\tlea r14, _%p_fallthrough\n"
+                    "\t\tlea r13, [rip + _%p]\n"
+                    "\t\tlea r14, [rip + _%p_fallthrough]\n"
                     "\t\tmov rbx, %p\n"
                     "\t\tjmp _take_conditional\n"
                     "\t_%p_fallthrough:\n"
@@ -108,7 +108,7 @@ int hm_code_generator_generate(const hm_disassembly_block *sorted_blocks, int64_
 
     /* write the floor unslide-ip to label data table */
 
-    fprintf(fp, ".rodata\n"
+    fprintf(fp, ".data\n"
                 "_unslid_virtual_ip_to_text_count:\n"
                 ".quad %p\n"
                 "_unslid_virtual_ip_to_text:\n",

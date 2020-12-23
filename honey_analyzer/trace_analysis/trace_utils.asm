@@ -1,5 +1,5 @@
 .intel_syntax noprefix
-.rodata
+.data
 LOG_COVERAGE_PRINTF: .asciz "ip = %p\n"
 BLOCK_ABORT_PRINTF: .asciz "Bad status code: %d\n"
 
@@ -37,9 +37,9 @@ _take_conditional:
     mov [rsp], r12
     mov rdi, rsp //ptr to unslid_ip
 
-    mov DWORD PTR[rsp + 8], 0
+    mov QWORD PTR[rsp + 8], 0
     lea rsi, [rsp + 8] //ptr to override next_code_location
-    call take_conditional_c
+    call _take_conditional_c
 
     mov r12, [rsp] //unpack our new unslid_ip
     mov r11, [rsp + 8] //unpack our next_code_location
@@ -82,7 +82,7 @@ _take_indirect_branch:
     mov [rsp], r12
     mov rdi, rsp
     lea rsi, [rsp + 8]
-    call take_indirect_branch_c
+    call _take_indirect_branch_c
     mov r12, [rsp + 0]
     mov rdi, [rsp + 8]
 
@@ -97,9 +97,9 @@ _take_indirect_branch:
 Thunk which displays an error code from RAX and then tears down block_decode
 */
 _block_decode_abort:
-    lea rdi, BLOCK_ABORT_PRINTF
+    lea rdi, [rip + BLOCK_ABORT_PRINTF]
     mov rsi, rax //status code
     xor rax, rax
-    call printf
+    call _printf
 
     jmp _block_decode_CLEANUP
