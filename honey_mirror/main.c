@@ -8,12 +8,12 @@
 int main() {
     hm_disassembly_block *blocks = NULL;
     int64_t block_count = 0;
-    if (!hm_disassembly_get_blocks_from_elf("/home/allison/Desktop/a.out", &blocks, &block_count)) {
+    if (!hm_disassembly_get_blocks_from_elf("/tmp/a.out", &blocks, &block_count)) {
         printf("Failed to get blocks!\n");
         abort();
     }
 
-    hm_code_generator_generate(blocks, block_count, "/home/allison/Desktop/test.s");
+    hm_code_generator_generate(blocks, block_count, "/tmp/test.s");
 
     free(blocks);
 

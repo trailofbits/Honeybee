@@ -10,160 +10,80 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <stdbool.h>
+
 #include "intel-pt.h"
 
+#include "trace_analysis/ha_session.h"
 
-extern int block_decode(uint64_t unslid_ip) asm ("_block_decode");
-
-void log_coverage(void) asm ("_log_coverage");
-void log_coverage(void) {
-    /* EVIL HACKS:
-     * We're violating sys-v calling convention for to avoid needing to bloat the text segment of the decode loop
-     * with tons of mov rdi, r12 (where where r12 is the IP in block_decode) and so we just...don't. r12 is a caller
-     * saved register and so we pull it out here. Are we in hell? maybe.
-     */
-    uint64_t ip;
-    asm("mov %%r12, %0" : "=r"(ip));
-    printf("ip=%p\n", (void *) ip);
-}
-
-
-struct pt_query_decoder *global_decoder;
-uint64_t binary_slide = 0x400000;
-
-int handle_events(int status, uint64_t *unslid_ip) {
-    while (status & pts_event_pending) {
-        struct pt_event event;
-
-        status = pt_qry_event(global_decoder, &event, sizeof(event));
-        if (status < 0)
-            break;
-
-        printf("event!: %d\n", event.type);
-        if (event.type == ptev_enabled) {
-            *unslid_ip = event.variant.enabled.ip;
-            printf("\tenable: %p\n", event.variant.enabled.ip - binary_slide);
-        }
-    }
-
-    return status;
-}
-
-extern uint64_t _unslid_virtual_ip_to_text_START asm("_unslid_virtual_ip_to_text");
-extern uint64_t _unslid_virtual_ip_to_text_count asm("_unslid_virtual_ip_to_text_count");
-
-uint64_t table_search_ip(uint64_t unslid_ip) asm("_table_search_ip");
-uint64_t table_search_ip(uint64_t unslid_ip) {
-    uint64_t *_unslid_virtual_ip_to_text = &_unslid_virtual_ip_to_text_START;
-
-    uint64_t left = 0;
-    uint64_t right = _unslid_virtual_ip_to_text_count;
-
-    while (left <= right) {
-        uint64_t search = (left + right) / 2;
-        uint64_t unslid_address = _unslid_virtual_ip_to_text[search * 2];
-        if (unslid_address <= unslid_ip
-            && unslid_ip < _unslid_virtual_ip_to_text[(search + 1) * 2]) {
-            return _unslid_virtual_ip_to_text[search * 2 + 1];
-        } else if (unslid_ip < unslid_address) {
-            right = search - 1;
-        } else {
-            left = search + 1;
-        }
-    }
-
-    return 0;
-}
-
-int take_indirect_branch_c(uint64_t *unslid_ip, uint64_t *next_code_location) asm("_take_indirect_branch_c");
-int take_indirect_branch_c(uint64_t *unslid_ip, uint64_t *next_code_location) {
-    int status;
-    uint64_t old = *unslid_ip;
-    if ((status = pt_qry_indirect_branch(global_decoder, unslid_ip)) < 0
-        || (status = handle_events(status, unslid_ip))) {
-        return status;
-    }
-
-    *unslid_ip -= binary_slide;
-    *next_code_location = table_search_ip(*unslid_ip);
-    if (!*next_code_location) {
-        return -1;
-    }
-
-    printf("\tvv indirect from %p to %p\n", old, *unslid_ip);
-
-    return 0;
-}
-int take_conditional_c(uint64_t *override_ip, uint64_t *override_code_location) asm("_take_conditional_c");
-int take_conditional_c(uint64_t *override_ip, uint64_t *override_code_location) {
-    int status;
-    int taken = -1;
-    uint64_t updated_ip = 0;
-
-    status = pt_qry_cond_branch(global_decoder, &taken);
-    status = handle_events(status, &updated_ip);
-
-    if (updated_ip) {
-        //We got a new IP from the trace. We need to submit a new IP and __TEXT location to continue decoding at.
-        updated_ip -= binary_slide;
-
-        *override_ip = updated_ip;
-        *override_code_location = table_search_ip(updated_ip);
-        printf("\tevent update, switching to %p\n", (void *)updated_ip);
-    } else if (status < 0) {
-        return status;
-    }
-
-    printf("\tvv taking conditional: %d\n",taken);
-
-    return taken;
-}
-
-#define TAG "[main] "
+#define TAG "[" __FILE__"] "
 
 int main() {
 
+    /*
+     * testing constants
+     */
+    const char *trace_path = "/tmp/ptout.3";
+    const uint64_t binary_slide = 0x400000;
+
+
+    int result;
     int fd = 0;
     void *map_handle = NULL;
-
-    fd = open("/tmp/trace/ptout.3", O_RDONLY);
-    struct pt_config config;
-
-
     struct stat sb;
-    int stat_result = fstat(fd, &sb);
+    ha_session_t session = NULL;
+
+    fd = open(trace_path, O_RDONLY);
+    if (fd < 0) {
+        printf(TAG "Failed to open trace!\n");
+        result = fd;
+        goto CLEANUP;
+    }
+
+    if ((result = fstat(fd, &sb)) < 0) {
+        printf(TAG "Failed to fstat!\n");
+        goto CLEANUP;
+    }
+
     map_handle = mmap(NULL, sb.st_size, PROT_READ, MAP_SHARED, fd, 0);
-
-    memset(&config, 0, sizeof(config));
-    config.size = sizeof(config);
-    config.begin = map_handle;
-    config.end = map_handle + sb.st_size;
-
-    uint64_t ip = NULL;
-    global_decoder = pt_qry_alloc_decoder(&config);
-    int status;
-    status = pt_qry_sync_forward(global_decoder, &ip);
-    status = handle_events(status, &ip);
-    if (status < 0) {
-        printf("error: %s\n", pt_errstr(pt_errcode(status)));
-        abort();
+    if (!map_handle) {
+        printf(TAG "mmap failed!\n");
+        result = -10;
+        goto CLEANUP;
     }
 
-    if (!ip) {
-        status = pt_qry_indirect_branch(global_decoder, &ip);
-        if (status < 0) {
-            printf("error: %s\n", pt_errstr(pt_errcode(status)));
-            abort();
-        }
+    result = ha_session_alloc(&session, map_handle, sb.st_size, binary_slide);
+    if (result) {
+        printf(TAG "Failed to start session, error=%d\n", result);
+        goto CLEANUP;
     }
-    printf("Trace init complete!\n");
 
-    status = block_decode(ip - binary_slide);
-    if (status < 0 && status != -pte_eos) {
-        printf("error: %s\n", pt_errstr(pt_errcode(status)));
+    result = ha_session_print_trace(session);
+    if (result < 0 && result != -pte_eos) {
+        printf(TAG "libipt error: %s\n", pt_errstr(pt_errcode(result)));
+        goto CLEANUP;
     }
-    printf("decode done\n");
 
+    printf(TAG "Decoding complete!\n");
+
+    /* Completed OK, clear the result if there is any */
+    result = 0;
+
+    CLEANUP:
+    if (session) {
+        ha_session_free(session);
+    }
+
+    if (map_handle) {
+        munmap(map_handle, sb.st_size);
+    }
+
+    if (fd) {
+        close(fd);
+    }
+
+    if (result) {
+        return 1;
+    }
 
     return 0;
 }

@@ -11,11 +11,13 @@ target_link_libraries(honey_mirror ${CMAKE_SOURCE_DIR}/dependencies/xed/obj/libx
 project(honey_analyzer C ASM)
 add_executable(honey_analyzer
         honey_analyzer/main.c
-        honey_analyzer/trace_analysis/trace_utils.asm
+        honey_analyzer/trace_analysis/ha_mirror_block_decode_thunks.asm
         /tmp/test.s
-        )
+        honey_analyzer/trace_analysis/ha_session.c
+        honey_analyzer/trace_analysis/ha_session.h
+        honey_analyzer/trace_analysis/ha_mirror_utils.h
+        honey_analyzer/trace_analysis/ha_mirror_utils.c)
 target_compile_options(honey_analyzer PRIVATE -masm=intel)
-#target_compile_options(honey_analyzer PRIVATE -fomit-frame-pointer)
 target_include_directories(honey_analyzer PRIVATE ${CMAKE_SOURCE_DIR}/dependencies/libipt/libipt/include)
 target_link_libraries(honey_analyzer ${CMAKE_SOURCE_DIR}/dependencies/libipt/lib/libipt.a)
 

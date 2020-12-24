@@ -53,25 +53,26 @@ int hm_code_generator_generate(const hm_disassembly_block *sorted_blocks, int64_
     fprintf(fp,
             ".intel_syntax noprefix\n"
             ".text\n"
-            ".globl _block_decode, _block_decode_CLEANUP, _unslid_virtual_ip_to_text, "
-            "_unslid_virtual_ip_to_text_count\n"
-            "_block_decode:\n"
+            ".globl _ha_mirror_block_decode, _ha_mirror_block_decode_CLEANUP, _ha_mirror_unslid_virtual_ip_to_text, "
+            "_ha_mirror_unslid_virtual_ip_to_text_count\n"
+            "_ha_mirror_block_decode:\n"
             "\t#Epilogue\n"
             "\tsub  rsp, 48\n"
-            "\tmov [rsp + 0], r12 #IP\n"
-            "\t/* These registers are used for the _take_conditional thunk since they are callee saved */\n"
+            "\tmov [rsp + 0], r12 #ha_session ptr\n"
+            "\t/* These registers are used for the _take_conditional_thunk thunk since they are callee saved */\n"
             "\tmov [rsp + 8], r13 #Taken jump address\n"
             "\tmov [rsp + 16], r14 #Not-taken fallthrough jump address\n"
-            "\tmov [rsp + 24], r15 #_block_decode_ANY_JUMP, 3 bytes instead of 5.\n"
-            "\tmov [rsp + 32], rbp #_log_coverage, jmp rbp is just 2 bytes instead of 5.\n"
-            "\tmov [rsp + 40], rbx #_take_conditional, jmp rbx is just 2 instead of 5.\n"
-
-            "\tmov r12, rdi #Stash IP\n"
-            "\tlea r15, [rip + _block_decode_ANY_JUMP]\n"
-            "\tlea rbp, [rip + _log_coverage]\n"
-            "\tlea rbx, [rip + _take_conditional]\n"
-            "\t//Jump to the starting point (pass rsi through)\n"
-            "\tcall _table_search_ip\n"
+            "\tmov [rsp + 24], r15 #_ha_mirror_block_decode_ANY_JUMP, 3 bytes instead of 5.\n"
+            "\tmov [rsp + 32], rbp #_ha_mirror_log_coverage, jmp rbp is just 2 bytes instead of 5.\n"
+            "\tmov [rsp + 40], rbx #_ha_mirror_take_conditional_thunk, jmp rbx is just 2 instead of 5.\n"
+            "\tmov r12, rdi #Stash our ha_session ptr\n"
+            "\tmov r11, rsi #Stash our initial unslid IP\n"
+            "\tlea r15, [rip + _ha_mirror_block_decode_ANY_JUMP]\n"
+            "\tlea rbp, [rip + _ha_mirror_call_on_block_outlined]\n"
+            "\tlea rbx, [rip + _ha_mirror_take_conditional_thunk]\n"
+            "\t//Jump to the starting point\n"
+            "\tmov rdi, r11\n"
+            "\tcall _ha_mirror_utils_convert_unslid_to_code\n"
             "\tjmp rax\n\n"
     );
 
@@ -90,11 +91,11 @@ int hm_code_generator_generate(const hm_disassembly_block *sorted_blocks, int64_
 
 
     //We use a shared "any jump" procedure for all indirect branches since they're the same except with a different
-    // r12. For performance and code size reasons, we merge them all.
+    // r11. For performance and code size reasons, we merge them all.
     fprintf(fp,
-            "\t_block_decode_ANY_JUMP:\n"
+            "\t_ha_mirror_block_decode_ANY_JUMP:\n"
             "\t\tcall rbp #_log_coverage\n"
-            "\t\tjmp _take_indirect_branch\n"
+            "\t\tjmp _ha_mirror_take_indirect_branch_thunk\n"
             );
 
     //Write out all other blocks
@@ -110,7 +111,7 @@ int hm_code_generator_generate(const hm_disassembly_block *sorted_blocks, int64_
         //Write out the block header (which logs coverage
         fprintf(fp,
                 "\t_%p:\n" //This block's label
-                "\t\tcall rbp #_log_coverage\n",
+                "\t\tcall rbp #_ha_mirror_call_on_block_outlined\n",
                 (void *)block->start_offset);
 
         if (block->instruction_category == XED_CATEGORY_COND_BR) {
@@ -118,29 +119,29 @@ int hm_code_generator_generate(const hm_disassembly_block *sorted_blocks, int64_
             void *taken = (void *)sorted_blocks[next_block_i].start_offset;
 
             if (cofi_destination_block_indexes[next_block_i] < 0) {
-                fprintf(fp, "\t\tmov r13, r15 #_block_decode_ANY_JUMP\n");
+                fprintf(fp, "\t\tmov r13, r15 #_ha_mirror_block_decode_ANY_JUMP\n");
             } else {
                 fprintf(fp, "\t\tlea r13, [rip + _%p]\n", taken);
             }
 
             if (i + 1 < block_count && cofi_destination_block_indexes[i + 1] < 0) {
-                fprintf(fp, "\t\tmov r14, r15 #_block_decode_ANY_JUMP\n");
+                fprintf(fp, "\t\tmov r14, r15 #_ha_mirror_block_decode_ANY_JUMP\n");
             } else {
                 fprintf(fp, "\t\tlea r14, [rip + _%p]\n", not_taken);
             }
 
             fprintf(fp,
-                    "\t\tmov r12, %p\n"
+                    "\t\tmov r11, %p\n"
                     "\t\tmov rdi, %p\n"
-                    "\t\tjmp rbx #_take_conditional\n",
+                    "\t\tjmp rbx #_ha_mirror_take_conditional_thunk\n",
                     (void *) block->cofi_destination,
                     not_taken);
         } else {
             //We have an unconditional branch. This means we KNOW our target
             void *taken = (void *)sorted_blocks[next_block_i].start_offset;
-            fprintf(fp, "\t\tmov r12, %p\n", (void *) block->cofi_destination);
+            fprintf(fp, "\t\tmov r11, %p\n", (void *) block->cofi_destination);
             if (cofi_destination_block_indexes[next_block_i] < 0) {
-                fprintf(fp, "\t\tjmp r15 #_block_decode_ANY_JUMP\n");
+                fprintf(fp, "\t\tjmp r15 #_ha_mirror_block_decode_ANY_JUMP\n");
             } else {
                 fprintf(fp, "\t\tjmp _%p\n", taken);
             }
@@ -149,7 +150,7 @@ int hm_code_generator_generate(const hm_disassembly_block *sorted_blocks, int64_
 
     //Write the epilogue
     fprintf(fp,
-            "\t_block_decode_CLEANUP:"
+            "\t_ha_mirror_block_decode_CLEANUP:\n"
             "\t#Prologue -- be sure to put a return value in rax!\n"
             "\tmov r12, [rsp + 0]\n"
             "\tmov r13, [rsp + 8]\n"
@@ -162,7 +163,7 @@ int hm_code_generator_generate(const hm_disassembly_block *sorted_blocks, int64_
 
     /* write the floor unslide-ip to label data table */
     fprintf(fp, ".data\n"
-                "_unslid_virtual_ip_to_text:\n");
+                "_ha_mirror_unslid_virtual_ip_to_text:\n");
 
     //We can shrink the number of items in our table by joining contiguous indirect blocks (since they all go to the
     // same location).
@@ -177,7 +178,7 @@ int hm_code_generator_generate(const hm_disassembly_block *sorted_blocks, int64_
             fprintf(fp, ".quad %p\n", (void *) block->start_offset);
 
             if (is_indirect) {
-                fprintf(fp, ".quad _block_decode_ANY_JUMP\n");
+                fprintf(fp, ".quad _ha_mirror_block_decode_ANY_JUMP\n");
             } else {
                 fprintf(fp, ".quad _%p\n", (void *) block->start_offset);
             }
@@ -193,9 +194,9 @@ int hm_code_generator_generate(const hm_disassembly_block *sorted_blocks, int64_
     fprintf(fp,
             ".quad %p\n"
             ".quad %p\n"
-            "_unslid_virtual_ip_to_text_count:\n"
+            "_ha_mirror_unslid_virtual_ip_to_text_count:\n"
             ".quad %p\n"
-            "_real_basic_block_count:\n"
+            "_ha_mirror_real_basic_block_count:\n"
             ".quad %p\n",
             (void *) UINT64_MAX,
             (void *) UINT64_MAX,
