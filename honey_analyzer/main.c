@@ -13,7 +13,7 @@
 #include "intel-pt.h"
 
 
-extern void block_decode(uint64_t unslid_ip) asm ("_block_decode");
+extern int block_decode(uint64_t unslid_ip) asm ("_block_decode");
 
 void log_coverage(void) asm ("_log_coverage");
 void log_coverage(void) {
@@ -94,24 +94,27 @@ int take_indirect_branch_c(uint64_t *unslid_ip, uint64_t *next_code_location) {
 
     return 0;
 }
-
-int take_conditional_c(uint64_t *unslid_ip, uint64_t *next_code_location_or_null) {
+int take_conditional_c(uint64_t *override_ip, uint64_t *override_code_location) asm("_take_conditional_c");
+int take_conditional_c(uint64_t *override_ip, uint64_t *override_code_location) {
     int status;
     int taken = -1;
-    uint64_t old = *unslid_ip;
+    uint64_t updated_ip = 0;
 
     status = pt_qry_cond_branch(global_decoder, &taken);
-    status = handle_events(status, unslid_ip);
+    status = handle_events(status, &updated_ip);
 
-    if (*unslid_ip != old) {
-        printf("\tchanged from %p -> %p\n", old, *unslid_ip);
-        *unslid_ip -= binary_slide;
-        *next_code_location_or_null = table_search_ip(*unslid_ip);
+    if (updated_ip) {
+        //We got a new IP from the trace. We need to submit a new IP and __TEXT location to continue decoding at.
+        updated_ip -= binary_slide;
+
+        *override_ip = updated_ip;
+        *override_code_location = table_search_ip(updated_ip);
+        printf("\tevent update, switching to %p\n", (void *)updated_ip);
     } else if (status < 0) {
         return status;
     }
 
-    printf("\tvv taking conditional from %p: %d\n", old, taken);
+    printf("\tvv taking conditional: %d\n",taken);
 
     return taken;
 }
@@ -155,7 +158,10 @@ int main() {
     }
     printf("Trace init complete!\n");
 
-    block_decode(ip - binary_slide);
+    status = block_decode(ip - binary_slide);
+    if (status < 0 && status != -pte_eos) {
+        printf("error: %s\n", pt_errstr(pt_errcode(status)));
+    }
     printf("decode done\n");
 
 

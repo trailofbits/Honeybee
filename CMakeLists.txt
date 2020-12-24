@@ -12,9 +12,10 @@ project(honey_analyzer C ASM)
 add_executable(honey_analyzer
         honey_analyzer/main.c
         honey_analyzer/trace_analysis/trace_utils.asm
-        ../test.s
+        /tmp/test.s
         )
 target_compile_options(honey_analyzer PRIVATE -masm=intel)
+#target_compile_options(honey_analyzer PRIVATE -fomit-frame-pointer)
 target_include_directories(honey_analyzer PRIVATE ${CMAKE_SOURCE_DIR}/dependencies/libipt/libipt/include)
 target_link_libraries(honey_analyzer ${CMAKE_SOURCE_DIR}/dependencies/libipt/lib/libipt.a)
 

@@ -20,11 +20,11 @@ _log_coverage:
 A thunk which routes flow to the correct branch direction
 Expectations
     IN
-        r12: Virtual IP
+        r12: Virtual IP of the TAKEN BRANCH. You may safely clobber the current virtual IP, pass the taken virtual IP
         r13: The __TEXT address to jump to if we took the branch in the trace
         r14: The __TEXT fallthrough address to jump to if we DID NOT take the branch in the trace.
             This address should set r12 to the appropriate fallthrough value
-        rbx: The virtual IP if the branch is taken
+        r15: The virtual IP if the branch is not taken. This will replace r12 if the branch is not taken
      OUT:
         rip: If the branch was taken, this thunk routes to the next decoder function (same for not-taken)
             If the trace reports an IP update, however, neither branch will be taken and instead decoding will resume
@@ -34,36 +34,37 @@ Expectations
 _take_conditional:
     sub rsp, 16
 
-    mov [rsp], r12
-    mov rdi, rsp //ptr to unslid_ip
+    mov QWORD PTR[rsp], 0
+    mov rdi, rsp //ptr to override_ip
 
     mov QWORD PTR[rsp + 8], 0
-    lea rsi, [rsp + 8] //ptr to override next_code_location
+    lea rsi, [rsp + 8] //ptr to override_code_location
+
     call _take_conditional_c
 
-    mov r12, [rsp] //unpack our new unslid_ip
-    mov r11, [rsp + 8] //unpack our next_code_location
+    mov rdi, [rsp] //unpack our override_ip
+    mov r11, [rsp + 8] //unpack our override_code_location
 
     add rsp, 16
 
     test ax, ax
-    js _block_decode_abort //A negative return code (instead of 0/1 or NT/T) is an abort
+    js _block_decode_CLEANUP //A negative return code (instead of 0/1 or NT/T) stops decoding (could be an EOS). Leave in rax.
 
     //Now we need to decide which of the three address we want to jump to and how we want to update the virtual IP
-    test r11, r11 //Check if our IP changes as a result of an in-flight event
+    test r11, r11 //Check if we had an inflight event/we got an override_code_location
     jnz _take_conditional_INFLIGHT_EVENT
 
     //If we're here, we didn't have an in-flight IP update.
     test ax, ax
-    mov rax, r13 #Taken address -- assume we took the branch
-    cmovz rax, r14 #Not-taken address -- and replace it we we assumed wrong
-    mov r12, rbx //Move the taken virtual IP into our IP slot. If we end up jumping to fallthrough it'll be reset anyways
+    mov rax, r13   //Taken address -- assume we took the branch
+    cmovz rax, r14 //and replace it with the not-taken address if we assumed wrong
+    cmovz r12, r15 //r12 has the taken virtual IP (per input rules). Replace it if with NT virtual IP if we're NT.
     jmp rax
 
     _take_conditional_INFLIGHT_EVENT:
     //We already unpacked unslid_ip (which the C code updated for us) so we just need our jump addr
-    mov rax, r11
-    jmp rax
+    mov r12, rdi //unpack our override_ip into our virtual IP
+    jmp r11 //jump to our override_code_location
 
 
 /*
@@ -89,17 +90,5 @@ _take_indirect_branch:
     add rsp, 16
 
     test ax, ax
-    js _block_decode_abort //if we have a negative status code, something is broken
+    js _block_decode_CLEANUP //if we have a negative status code we need to terminate (might just be EOS). Leave in rax.
     jmp rdi
-
-
-/*
-Thunk which displays an error code from RAX and then tears down block_decode
-*/
-_block_decode_abort:
-    lea rdi, [rip + BLOCK_ABORT_PRINTF]
-    mov rsi, rax //status code
-    xor rax, rax
-    call _printf
-
-    jmp _block_decode_CLEANUP
