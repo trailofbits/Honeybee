@@ -62,11 +62,12 @@ int hm_code_generator_generate(const hm_disassembly_block *sorted_blocks, int64_
             "\t/* These registers are used for the _take_conditional thunk since they are callee saved */\n"
             "\tmov [rsp + 8], r13 #Taken jump address\n"
             "\tmov [rsp + 16], r14 #Not-taken fallthrough jump address\n"
-            "\tmov [rsp + 24], r15 #Taken virtual IP\n"
+            "\tmov [rsp + 24], r15 #_block_decode_ANY_JUMP, 3 bytes instead of 5.\n"
             "\tmov [rsp + 32], rbp #_log_coverage, jmp rbp is just 2 bytes instead of 5.\n"
             "\tmov [rsp + 40], rbx #_take_conditional, jmp rbx is just 2 instead of 5.\n"
 
             "\tmov r12, rdi #Stash IP\n"
+            "\tlea r15, [rip + _block_decode_ANY_JUMP]\n"
             "\tlea rbp, [rip + _log_coverage]\n"
             "\tlea rbx, [rip + _take_conditional]\n"
             "\t//Jump to the starting point (pass rsi through)\n"
@@ -89,19 +90,9 @@ int hm_code_generator_generate(const hm_disassembly_block *sorted_blocks, int64_
 
 
     //We use a shared "any jump" procedure for all indirect branches since they're the same except with a different
-    // r12. For performance and code size reasons, we merge them all. We do, however, need to apply every indirect
-    // branch label _here_ so that the rest of the code wires up correctly.
-    fprintf(fp, "\t_block_decode_ANY_JUMP:\n");
-    for (int64_t i = 0; i < block_count; i++) {
-        const hm_disassembly_block *block = sorted_blocks + i;
-        if (cofi_destination_block_indexes[i] < 0) {
-            //We don't have a known destination, dump this block in the any jump
-            fprintf(fp, "\t_%p:\n", (void *)block->start_offset);
-        }
-    }
-
-    //Write out the actually any jump procedure
+    // r12. For performance and code size reasons, we merge them all.
     fprintf(fp,
+            "\t_block_decode_ANY_JUMP:\n"
             "\t\tcall rbp #_log_coverage\n"
             "\t\tjmp _take_indirect_branch\n"
             );
@@ -125,22 +116,34 @@ int hm_code_generator_generate(const hm_disassembly_block *sorted_blocks, int64_
         if (block->instruction_category == XED_CATEGORY_COND_BR) {
             void *not_taken = (void *)(block->start_offset + block->length + block->last_instruction_size);
             void *taken = (void *)sorted_blocks[next_block_i].start_offset;
-            fprintf(fp,
-                    "\t\tlea r13, [rip + _%p]\n"
-                    "\t\tmov r12, %p\n"
-                    "\t\tlea r14, [rip + _%p]\n"
-                    "\t\tmov r15, %p\n"
-                    "\t\tjmp rbx #_take_conditional\n",
-                    taken, (void *) block->cofi_destination,
-                    not_taken, not_taken);
 
+            if (cofi_destination_block_indexes[next_block_i] < 0) {
+                fprintf(fp, "\t\tmov r13, r15 #_block_decode_ANY_JUMP\n");
+            } else {
+                fprintf(fp, "\t\tlea r13, [rip + _%p]\n", taken);
+            }
+
+            if (i + 1 < block_count && cofi_destination_block_indexes[i + 1] < 0) {
+                fprintf(fp, "\t\tmov r14, r15 #_block_decode_ANY_JUMP\n");
+            } else {
+                fprintf(fp, "\t\tlea r14, [rip + _%p]\n", not_taken);
+            }
+
+            fprintf(fp,
+                    "\t\tmov r12, %p\n"
+                    "\t\tmov rdi, %p\n"
+                    "\t\tjmp rbx #_take_conditional\n",
+                    (void *) block->cofi_destination,
+                    not_taken);
         } else {
             //We have an unconditional branch. This means we KNOW our target
             void *taken = (void *)sorted_blocks[next_block_i].start_offset;
-            fprintf(fp,
-                    "\t\tmov r12, %p\n"
-                    "\t\tjmp _%p\n",
-                    (void *) block->cofi_destination, taken);
+            fprintf(fp, "\t\tmov r12, %p\n", (void *) block->cofi_destination);
+            if (cofi_destination_block_indexes[next_block_i] < 0) {
+                fprintf(fp, "\t\tjmp r15 #_block_decode_ANY_JUMP\n");
+            } else {
+                fprintf(fp, "\t\tjmp _%p\n", taken);
+            }
         }
     }
 
@@ -159,17 +162,29 @@ int hm_code_generator_generate(const hm_disassembly_block *sorted_blocks, int64_
 
     /* write the floor unslide-ip to label data table */
     fprintf(fp, ".data\n"
-                "_unslid_virtual_ip_to_text_count:\n"
-                ".quad %p\n"
-                "_unslid_virtual_ip_to_text:\n",
-            (void *) block_count);
+                "_unslid_virtual_ip_to_text:\n");
+
+    //We can shrink the number of items in our table by joining contiguous indirect blocks (since they all go to the
+    // same location).
+    bool last_was_indirect = false;
+    int64_t table_true_count = 0;
     for (int64_t i = 0; i < block_count; i++) {
         const hm_disassembly_block *block = sorted_blocks + i;
-        fprintf(fp,
-                ".quad %p\n"
-                ".quad _%p\n",
-                (void *) block->start_offset,
-                (void *) block->start_offset);
+        bool is_indirect = cofi_destination_block_indexes[i] < 0;
+        if (!last_was_indirect /* if the last wasn't indirect, we have to emit as we have nobody to join to */
+            || !is_indirect /* if we aren't indirect we have to emit */
+            ) {
+            fprintf(fp, ".quad %p\n", (void *) block->start_offset);
+
+            if (is_indirect) {
+                fprintf(fp, ".quad _block_decode_ANY_JUMP\n");
+            } else {
+                fprintf(fp, ".quad _%p\n", (void *) block->start_offset);
+            }
+
+            last_was_indirect = is_indirect;
+            table_true_count++;
+        }
     }
 
     //Add a final entry with max values
@@ -177,9 +192,15 @@ int hm_code_generator_generate(const hm_disassembly_block *sorted_blocks, int64_
     //The last entry will just be ridiculously large, but this doesn't matter since we use this to floor
     fprintf(fp,
             ".quad %p\n"
+            ".quad %p\n"
+            "_unslid_virtual_ip_to_text_count:\n"
+            ".quad %p\n"
+            "_real_basic_block_count:\n"
             ".quad %p\n",
             (void *) UINT64_MAX,
-            (void *) UINT64_MAX);
+            (void *) UINT64_MAX,
+            (void *)table_true_count,
+            (void *)block_count);
 
     CLEANUP:
     if (fp) {

@@ -24,7 +24,7 @@ Expectations
         r13: The __TEXT address to jump to if we took the branch in the trace
         r14: The __TEXT fallthrough address to jump to if we DID NOT take the branch in the trace.
             This address should set r12 to the appropriate fallthrough value
-        r15: The virtual IP if the branch is not taken. This will replace r12 if the branch is not taken
+        rdi: The virtual IP if the branch is not taken. This will replace r12 if the branch is not taken
      OUT:
         rip: If the branch was taken, this thunk routes to the next decoder function (same for not-taken)
             If the trace reports an IP update, however, neither branch will be taken and instead decoding will resume
@@ -34,7 +34,7 @@ Expectations
 _take_conditional:
     sub rsp, 16
 
-    mov QWORD PTR[rsp], 0
+    mov [rsp], rdi //We stash rdi (the NT virtual IP) as a hack. Since take_conditional_c does not write here on override, it'll be there if we need it and not there if we don't. This frees up a register.
     mov rdi, rsp //ptr to override_ip
 
     mov QWORD PTR[rsp + 8], 0
@@ -42,7 +42,7 @@ _take_conditional:
 
     call _take_conditional_c
 
-    mov rdi, [rsp] //unpack our override_ip
+    mov rdi, [rsp] //unpack our override_ip or NT VIP
     mov r11, [rsp + 8] //unpack our override_code_location
 
     add rsp, 16
@@ -50,7 +50,7 @@ _take_conditional:
     test ax, ax
     js _block_decode_CLEANUP //A negative return code (instead of 0/1 or NT/T) stops decoding (could be an EOS). Leave in rax.
 
-    //Now we need to decide which of the three address we want to jump to and how we want to update the virtual IP
+    //Now we need to decide which of the three address we want to jump to and how we want to update the VIP
     test r11, r11 //Check if we had an inflight event/we got an override_code_location
     jnz _take_conditional_INFLIGHT_EVENT
 
@@ -58,7 +58,7 @@ _take_conditional:
     test ax, ax
     mov rax, r13   //Taken address -- assume we took the branch
     cmovz rax, r14 //and replace it with the not-taken address if we assumed wrong
-    cmovz r12, r15 //r12 has the taken virtual IP (per input rules). Replace it if with NT virtual IP if we're NT.
+    cmovz r12, rdi //r12 has the taken VIP (per input rules). Replace it if with NT VIP if we're NT. /* rdi still holds the NT VIP because no override_ip was given by the C function, and so we pulled the old value from the stack */
     jmp rax
 
     _take_conditional_INFLIGHT_EVENT:
