@@ -21,8 +21,8 @@ Expectations
 _ha_mirror_take_conditional_thunk:
     sub rsp, 16
 
-    mov rdi, r12 //ha_session ptr
     mov [rsp], rdi //We stash rdi (the NT virtual IP) as a hack. Since take_conditional_c does not write here on override, it'll be there if we need it and not there if we don't. This frees up a register.
+    mov rdi, r12 //ha_session ptr
     mov rsi, rsp //ptr to override_ip
 
     mov [rsp + 8], r11 //We stash r11 (the T virtual IP) as a hack. Same as above.
@@ -83,8 +83,10 @@ _ha_mirror_take_indirect_branch_thunk:
     jmp rdi
 
 _ha_mirror_call_on_block_outlined:
+    sub rsp, 8
     mov rdi, r12 //ha_session ptr
     mov rsi, r11 //block virtual IP
     mov rax, [r12] //on block function ptr
     call rax
+    add rsp, 8
     ret

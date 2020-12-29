@@ -10,6 +10,7 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <stdbool.h>
+#include <mach/mach_time.h>
 
 #include "intel-pt.h"
 
@@ -22,8 +23,9 @@ int main() {
     /*
      * testing constants
      */
-    const char *trace_path = "/tmp/ptout.3";
-    const uint64_t binary_slide = 0x400000;
+    const char *trace_path = "/tmp/ptout.1";
+    const uint64_t slid_load_sideband_address = 0x55555555d000;
+    const uint64_t binary_offset_sideband = 36864;
 
 
     int result;
@@ -51,13 +53,18 @@ int main() {
         goto CLEANUP;
     }
 
-    result = ha_session_alloc(&session, map_handle, sb.st_size, binary_slide);
+
+    result = ha_session_alloc(&session, map_handle, sb.st_size , slid_load_sideband_address - binary_offset_sideband);
     if (result) {
         printf(TAG "Failed to start session, error=%d\n", result);
         goto CLEANUP;
     }
 
+    uint64_t start = mach_absolute_time();
     result = ha_session_print_trace(session);
+//    result = ha_session_perform_libipt_audit(session, "/tmp/a.out");
+    uint64_t stop = mach_absolute_time();
+    printf(TAG "Trace time = %llu ns\n", stop - start);
     if (result < 0 && result != -pte_eos) {
         printf(TAG "libipt error: %s\n", pt_errstr(pt_errcode(result)));
         goto CLEANUP;

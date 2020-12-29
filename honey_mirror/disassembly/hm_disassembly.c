@@ -56,6 +56,7 @@ bool is_qualifying_cofi(xed_category_enum_t category) {
 bool hm_disassembly_get_blocks_from_elf(const char *path, hm_disassembly_block **blocks, int64_t *blocks_count) {
     int fd = 0;
     void *map_handle = NULL;
+    hm_disassembly_block *_blocks = NULL;
     bool success = false;
 
     fd = open(path, O_RDONLY);
@@ -114,7 +115,7 @@ bool hm_disassembly_get_blocks_from_elf(const char *path, hm_disassembly_block *
 
     size_t blocks_capacity = 16;
     int64_t blocks_write_index = 0;
-    hm_disassembly_block *_blocks = malloc(sizeof(hm_disassembly_block) * blocks_capacity);
+    _blocks = malloc(sizeof(hm_disassembly_block) * blocks_capacity);
     if (!_blocks) {
         printf(TAG "Out of memory!\n");
         success = false;
@@ -157,10 +158,7 @@ bool hm_disassembly_get_blocks_from_elf(const char *path, hm_disassembly_block *
             if (is_qualifying_cofi(category)) {
                 int32_t branch_displacement = xed_decoded_inst_get_branch_displacement(&xedd);
                 uint64_t cofi_destination = UINT64_MAX;
-                if (branch_displacement
-                    /* allow branches with no displacement (step over) if they aren't loading the target from mem */
-                    || ((category == XED_CATEGORY_UNCOND_BR || category == XED_CATEGORY_COND_BR)) &&
-                       xed_decoded_inst_number_of_memory_operands(&xedd) == 0) {
+                if (xed_operand_values_has_branch_displacement(xed_decoded_inst_operands_const(&xedd))) {
                     cofi_destination = insn_va + insn_length + branch_displacement;
                 }
 

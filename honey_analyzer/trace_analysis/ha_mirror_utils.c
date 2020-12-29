@@ -8,8 +8,8 @@
 uint64_t ha_mirror_utils_convert_unslid_to_code(uint64_t unslid_ip) {
     uint64_t *_unslid_virtual_ip_to_text = &ha_mirror_unslid_virtual_ip_to_text_START;
 
-    uint64_t left = 0;
-    uint64_t right = ha_mirror_unslid_virtual_ip_to_text_count;
+    int64_t left = 0;
+    int64_t right = ha_mirror_unslid_virtual_ip_to_text_count;
 
     while (left <= right) {
         uint64_t search = (left + right) / 2;

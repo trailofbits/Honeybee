@@ -57,7 +57,7 @@ int hm_code_generator_generate(const hm_disassembly_block *sorted_blocks, int64_
             "_ha_mirror_unslid_virtual_ip_to_text_count\n"
             "_ha_mirror_block_decode:\n"
             "\t#Epilogue\n"
-            "\tsub  rsp, 48\n"
+            "\tsub  rsp, 56\n"
             "\tmov [rsp + 0], r12 #ha_session ptr\n"
             "\t/* These registers are used for the _take_conditional_thunk thunk since they are callee saved */\n"
             "\tmov [rsp + 8], r13 #Taken jump address\n"
@@ -79,6 +79,7 @@ int hm_code_generator_generate(const hm_disassembly_block *sorted_blocks, int64_
     //Generate our cofi destination table
     for (int64_t i = 0; i < block_count; i++) {
         const hm_disassembly_block *block = sorted_blocks + i;
+
         int64_t next_block_i = -1;
         if (block->cofi_destination == UINT64_MAX
             || (next_block_i = lookup_block_sorted(sorted_blocks, block_count, block->cofi_destination)) == -1) {
@@ -158,7 +159,7 @@ int hm_code_generator_generate(const hm_disassembly_block *sorted_blocks, int64_
             "\tmov r15, [rsp + 24]\n"
             "\tmov rbp, [rsp + 32]\n"
             "\tmov rbx, [rsp + 40]\n"
-            "\tadd rsp, 48\n"
+            "\tadd rsp, 56\n"
             "\tret\n\n");
 
     /* write the floor unslide-ip to label data table */
