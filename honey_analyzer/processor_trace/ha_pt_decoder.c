@@ -41,7 +41,7 @@ SOFTWARE.
 #include <stdbool.h>
 
 //#define LOGGER(format, ...)  (void)0
-#define LOGGER(format, ...) (printf(format, ##__VA_ARGS__))
+#define LOGGER(format, ...) (printf("[" __FILE__ "] " format, ##__VA_ARGS__))
 #define likely(x)       __builtin_expect((x),1)
 #define unlikely(x)     __builtin_expect((x),0)
 
@@ -150,11 +150,6 @@ typedef struct internal_ha_pt_decoder {
     /** The last TIP. This is used for understanding future TIPs since they are masks on this value. */
     uint64_t last_tip;
 
-    /** The decoder expects a 'seed' indirect jump to locate itself. We get this from the first PGE.TIP. */
-    bool has_emitted_starting_pge;
-
-    uint64_t pending_fup;
-
     /* KEEP THIS LAST FOR THE SAKE OF THE CACHE */
     /** The cache struct. This is exposed directly to clients. */
     ha_pt_decoder_cache cache;
@@ -238,8 +233,9 @@ void ha_pt_decoder_free(ha_pt_decoder_t decoder) {
 }
 
 void ha_pt_decoder_reset(ha_pt_decoder_t decoder) {
-    //Reset the iterator
     decoder->i_pt_buffer = decoder->pt_buffer;
+    decoder->last_tip = 0;
+    bzero(&decoder->cache, sizeof(ha_pt_decoder_cache));
 }
 
 ha_pt_decoder_cache *ha_pt_decoder_get_cache_ptr(ha_pt_decoder_t decoder) {
@@ -260,28 +256,24 @@ int ha_pt_decoder_sync_forward(ha_pt_decoder_t decoder) {
 /* *** Intel PT decode *** */
 
 __attribute__((always_inline))
-static inline void cache_push_indirect_ip(ha_pt_decoder_t decoder, uint64_t ip) {
-    decoder->cache.indirect_mask_cache[(decoder->cache.indirect_mask_index + decoder->cache.indirect_mask_count++)
-        % COUNT_OF(decoder->cache.indirect_mask_cache)] = ip;
-}
-
-__attribute__((always_inline))
-static inline bool cache_is_indirect_cache_full(ha_pt_decoder_t decoder) {
-    return (decoder->cache.indirect_mask_count) >= COUNT_OF(decoder->cache.indirect_mask_cache);
-}
-
-__attribute__((always_inline))
 static inline void cache_push_tnt(ha_pt_decoder_t decoder, uint8_t tnt) {
-    uint64_t bucket = (decoder->cache.tnt_cache_bit_position + decoder->cache.tnt_cache_bit_position / 8) % COUNT_OF
-            (decoder->cache.tnt_cache);
-    decoder->cache.tnt_cache[bucket] = decoder->cache.tnt_cache[bucket] << 1 | tnt;
-    decoder->cache.tnt_cache_bit_count++;
+    decoder->cache.tnt_cache[decoder->cache.tnt_cache_count++] = tnt;
 }
 
 __attribute__((always_inline))
 static inline bool cache_is_tnt_cache_full(ha_pt_decoder_t decoder) {
-    return (decoder->cache.tnt_cache_bit_count + 64 /* we add 64 since we don't want to fill up on a large TNT */
-    ) >= COUNT_OF(decoder->cache.tnt_cache) * 8;
+    //We subtract 47 from our capacity since a large TNT can have up to 47 and we don't want to go over
+    return decoder->cache.tnt_cache_count >= COUNT_OF(decoder->cache.tnt_cache) - 47;
+}
+
+static inline uint64_t cache_tnt_count(ha_pt_decoder_t decoder) {
+    return decoder->cache.tnt_cache_count - decoder->cache.tnt_cache_index;
+}
+
+__attribute__((always_inline))
+static inline void cache_purge_tnt(ha_pt_decoder_t decoder) {
+    decoder->cache.tnt_cache_count = 0;
+    decoder->cache.tnt_cache_index = 0;
 }
 
 
@@ -300,43 +292,36 @@ static inline uint64_t get_ip_val(uint8_t **pp, uint64_t *last_ip){
 
     return *last_ip;
 }
-__attribute__((always_inline))
 static inline bool tip_handler(ha_pt_decoder_t decoder) {
-    cache_push_indirect_ip(decoder, get_ip_val(&decoder->i_pt_buffer, &decoder->last_tip));
-    LOGGER("TIP    \t%p (TNT: %llu)\n", (void *)decoder->last_tip, decoder->cache.tnt_cache_bit_count);
-    return !cache_is_indirect_cache_full(decoder);
+    decoder->cache.next_indirect_branch_target = get_ip_val(&decoder->i_pt_buffer, &decoder->last_tip);
+    LOGGER("TIP    \t%p (TNT: %llu)\n", (void *)decoder->last_tip, cache_tnt_count(decoder));
+    return false;
 }
 
-__attribute__((always_inline))
 static inline bool tip_pge_handler(ha_pt_decoder_t decoder) {
+    uint64_t last = decoder->last_tip;
     uint64_t result = get_ip_val(&decoder->i_pt_buffer, &decoder->last_tip);
+    LOGGER("PGE    \t%p (TNT: %llu)\n", (void *)decoder->last_tip, cache_tnt_count(decoder));
 
-    LOGGER("PGE    \t%p (TNT: %llu)\n", (void *)decoder->last_tip, decoder->cache.tnt_cache_bit_count);
-
-    if (unlikely(!decoder->has_emitted_starting_pge)) {
-        //Push the first PGE.TIP so that the decoder has somewhere to start from
-        cache_push_indirect_ip(decoder, result);
-        decoder->has_emitted_starting_pge = true;
-        return !cache_is_indirect_cache_full(decoder);
+    if (likely(last != result)) {
+        decoder->cache.override_target = result;
+        return false;
     }
 
     return true;
 }
 
-__attribute__((always_inline))
 static inline bool tip_pgd_handler(ha_pt_decoder_t decoder) {
-    uint8_t len = (*(decoder->i_pt_buffer)++ >> PT_PKT_TIP_SHIFT);
-    decoder->i_pt_buffer += (len*2);
-    LOGGER("PGD\n");
+    get_ip_val(&decoder->i_pt_buffer, &decoder->last_tip);
+    LOGGER("PGD    \t%p (TNT: %llu)\n", (void *)decoder->last_tip, cache_tnt_count(decoder));
     return true;
 }
 
-__attribute__((always_inline))
 static inline bool tip_fup_handler(ha_pt_decoder_t decoder) {
     uint64_t res = get_ip_val(&decoder->i_pt_buffer, &decoder->last_tip);
-//    cache_push_indirect_ip(decoder, res);
-    LOGGER("FUP    \t%p (TNT: %llu)\n", (void *)decoder->last_tip, decoder->cache.tnt_cache_bit_count);
-    return !cache_is_indirect_cache_full(decoder);
+    decoder->cache.override_target = res;
+    LOGGER("FUP    \t%p (TNT: %llu)\n", (void *)decoder->last_tip, cache_tnt_count(decoder));
+    return false;
 }
 
 static inline uint8_t asm_bsr(uint64_t x){
@@ -344,10 +329,9 @@ static inline uint8_t asm_bsr(uint64_t x){
     return x;
 }
 
-__attribute__((always_inline))
 static inline bool append_tnt_cache(ha_pt_decoder_t decoder, uint8_t data) {
     uint8_t bits = asm_bsr(data)-SHORT_TNT_OFFSET;
-    for(uint8_t i = SHORT_TNT_OFFSET; i < bits+SHORT_TNT_OFFSET; i++) {
+    for (int16_t i = bits + SHORT_TNT_OFFSET - 1; i >= SHORT_TNT_OFFSET; i--) {
         uint8_t b = (data >> i) & 0b1;
         cache_push_tnt(decoder, b);
     }
@@ -358,7 +342,7 @@ static inline bool append_tnt_cache(ha_pt_decoder_t decoder, uint8_t data) {
 __attribute__((always_inline))
 static inline bool append_tnt_cache_ltnt(ha_pt_decoder_t decoder, uint64_t data) {
     uint8_t bits = asm_bsr(data)-LONG_TNT_MAX_BITS;
-    for(uint8_t i = LONG_TNT_MAX_BITS; i < bits+LONG_TNT_MAX_BITS; i++){
+    for (int16_t i = bits + LONG_TNT_MAX_BITS - 1; i >= LONG_TNT_MAX_BITS; i--) {
         uint8_t b = (data >> i) & 0b1;
         cache_push_tnt(decoder, b);
     }

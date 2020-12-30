@@ -129,7 +129,8 @@ int ha_session_take_indirect_branch(ha_session_t session, uint64_t *override_ip,
 int ha_session_take_conditional(ha_session_t session, uint64_t *override_ip, uint64_t *override_code_location) {
     int taken = ha_pt_decoder_cache_query_tnt(session->decoder, override_ip);
     if (taken == 2) {
-        //FUP
+        //Override
+        *override_ip -= session->binary_slide;
         *override_code_location = ha_mirror_utils_convert_unslid_to_code(*override_ip);
 
         if (!*override_code_location) {
@@ -143,7 +144,6 @@ int ha_session_take_conditional(ha_session_t session, uint64_t *override_ip, uin
         return 0x3;
     }
 
-    uint64_t updated_ip = 0;
 
 #if DEBUG_LOGGING
     printf(TAG "\tvv taking conditional: %d\n", taken);
