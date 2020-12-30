@@ -12,13 +12,11 @@ typedef struct internal_ha_session * ha_session_t;
 /**
  * Create a new trace session
  * @param session_out The location to place a pointer to the created session. On error, left unchanged.
- * @param pt_buffer The pointer to the start of the raw trace buffer. The session DOES NOT own this buffer, you must
- * manage its lifetime on your own.
- * @param pt_buffer_len The length, in bytes, of the trace buffer
+ * @param trace_path The path to the raw PT trace
  * @param binary_slide The ASLR slide of the binary
  * @return Error code. On success, zero is returned
  */
-int ha_session_alloc(ha_session_t *session_out, const uint8_t *pt_buffer, size_t pt_buffer_len, uint64_t binary_slide);
+int ha_session_alloc(ha_session_t *session_out, const char *trace_path, uint64_t binary_slide);
 
 /**
  * Frees a session and all of its owned components

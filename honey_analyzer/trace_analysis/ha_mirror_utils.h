@@ -15,10 +15,9 @@ typedef void (ha_mirror_on_block_function)(ha_session_t session, uint64_t unslid
  * This is defined in the mirror output assembly file.
  * Initiate block level decoding of a given
  * @param session The session to decode blocks from
- * @param initial_unslid_ip The initial IP to begin decoding from
  * @return A libipt status code
  */
-extern int ha_mirror_block_decode(ha_session_t session, uint64_t initial_unslid_ip) asm ("_ha_mirror_block_decode");
+extern int ha_mirror_block_decode(ha_session_t session) asm ("_ha_mirror_block_decode");
 
 /**
  * The mirror contains an un-slid virtual IP to __TEXT map.
