@@ -26,18 +26,17 @@ class Test:
 		"""
 		Prints the results of this test and all of its traces
 		"""
-		success = self.build_exit_code == 0
-		print(f"[[{self.display_name}]]\nTarget build code = {str(self.build_exit_code)}")
+		overall_success = self.build_exit_code == 0
+		print(f"[[{self.display_name}]]\n* Target build code = {str(self.build_exit_code)}")
 		
 		for trace in self.traces:
 			description, success = trace.get_result_description_and_success()
 			if not success:
-				success = False
+				overall_success = False
 			print(description)
-		
-		summary_label = ["FAILED", "PASSED"][success]
-		print(f"TEST {summary_label}\n")
-		return success
+		summary_label = "PASSED" if overall_success else "FAILED"
+		print(f"* TEST {summary_label}\n")
+		return overall_success
 	
 class Trace:
 	__slots__ = ["display_name", "trace_path", "sideband_load_address", "sideband_offset", "libipt_audit_exit_code"]
@@ -53,10 +52,10 @@ class Trace:
 		Returns a string representation of the test report. Returns true iff all modules passed on this trace.
 		"""
 		success = self.libipt_audit_exit_code == 0
-		summary_label = ["FAILED", "PASSED"][success]
+		summary_label = "PASSED" if success else "FAILED"
 		description = f"\t[[{self.display_name}]]\n"\
-					  f"\tlibipt audit exit code = {str(self.libipt_audit_exit_code)}\n"\
-					  f"\tTRACE {summary_label}"
+					  f"\t* libipt audit exit code = {str(self.libipt_audit_exit_code)}\n"\
+					  f"\t* TRACE {summary_label}"
 		
 		return description, success
 		
@@ -86,7 +85,7 @@ def perform_libipt_audit(test, trace):
 	task.communicate() #wait
 	trace.libipt_audit_exit_code = task.returncode
 	if task.returncode != 0:
-		print("Build {trace.display_name} failed libipt audit with code {str(task.returncode)}")
+		print(f"[!!!] {test.display_name}.{trace.display_name} failed libipt audit with code {str(task.returncode)}")
 		return False
 	return True
 
@@ -95,13 +94,25 @@ def perform_libipt_audit(test, trace):
 
 tests = [
 	Test("contrived_small", TESTS_ROOT + "contrived_small/small", [
-		Trace("trace_1", TESTS_ROOT + "contrived_small/trace_1.pt", "0x401000", "0x1000")
+		Trace("trace_1", TESTS_ROOT + "contrived_small/trace_1.pt", "0x401000", "0x1000"),
+		Trace("trace_2_part_1", TESTS_ROOT + "contrived_small/trace_2_1.pt", "0x401000", "0x1000"),
+		Trace("trace_2_part_2", TESTS_ROOT + "contrived_small/trace_2_2.pt", "0x401000", "0x1000"),
+		Trace("trace_2_part_3", TESTS_ROOT + "contrived_small/trace_2_3.pt", "0x401000", "0x1000"),
 	]),
 	Test("contrived_medium", TESTS_ROOT + "contrived_medium/medium", [
-		Trace("trace_1", TESTS_ROOT + "contrived_medium/trace_1.pt", "0x401000", "0x1000")
+		Trace("trace_1", TESTS_ROOT + "contrived_medium/trace_1.pt", "0x401000", "0x1000"),
+		Trace("trace_2_part_1", TESTS_ROOT + "contrived_medium/trace_2_1.pt", "0x401000", "0x1000"),
+		Trace("trace_2_part_2", TESTS_ROOT + "contrived_medium/trace_2_2.pt", "0x401000", "0x1000"),
+		Trace("trace_2_part_3", TESTS_ROOT + "contrived_medium/trace_2_3.pt", "0x401000", "0x1000"),
+		Trace("trace_2_part_4", TESTS_ROOT + "contrived_medium/trace_2_4.pt", "0x401000", "0x1000"),
+
 	]),
 	Test("tar", TESTS_ROOT + "tar/tar", [
-		Trace("decompress_clion", TESTS_ROOT + "tar/decompress_clion.pt", "0x55555555d000", "0x9000")
+		Trace("decompress_clion", TESTS_ROOT + "tar/decompress_clion.pt", "0x55555555d000", "0x9000"),
+		Trace("help_page", TESTS_ROOT + "tar/help_page.pt", "0x55555555d000", "0x9000")
+	]),
+	Test("ssh", TESTS_ROOT + "ssh/ssh", [
+		Trace("interactive_login_attempt", TESTS_ROOT + "ssh/interactive_login_attempt.pt", "0x55555555e000", "0xa000"),
 	]),
 ]
 

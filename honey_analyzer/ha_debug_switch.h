@@ -8,7 +8,6 @@
 /*
  * This file contains global debug logging switches
  */
-
 /** Controls debug logging in ha_pt_decoder */
 #define HA_ENABLE_DECODER_LOGS 0
 /** Controls debug logging in ha_pt_session */

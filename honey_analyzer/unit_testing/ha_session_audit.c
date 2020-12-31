@@ -47,7 +47,7 @@ static void libipt_audit_on_block(ha_session_t session, uint64_t mirror_unslid_i
         while (result & pts_event_pending) {
             if (result < 0) {
                 printf(TAG "Testing failed, libipt event decode error: %d\n", result);
-                extra->status = HA_SESSION_AUDIT_TEST_LIBIPT_ERROR;
+                extra->status = -HA_SESSION_AUDIT_TEST_LIBIPT_ERROR;
                 return;
             }
             struct pt_event event;
@@ -56,7 +56,7 @@ static void libipt_audit_on_block(ha_session_t session, uint64_t mirror_unslid_i
 
         if (result < 0) {
             printf(TAG "Testing failed, libipt block decode error: %d\n", result);
-            extra->status = HA_SESSION_AUDIT_TEST_LIBIPT_ERROR;
+            extra->status = -HA_SESSION_AUDIT_TEST_LIBIPT_ERROR;
             return;
         }
     }
@@ -82,7 +82,7 @@ static void libipt_audit_on_block(ha_session_t session, uint64_t mirror_unslid_i
         printf(TAG "*** AUDIT FAILED ***\n");
         printf(TAG "mirror = %p, libipt = %p [honey_blocks = %llu]\n",
                (void *)mirror_unslid_ip, (void *)libipt_unslid, extra->honey_blocks_passed);
-        extra->status = HA_SESSION_AUDIT_TEST_INCORRECT_RESULT;
+        extra->status = -HA_SESSION_AUDIT_TEST_INCORRECT_RESULT;
 //        asm("ud2");
     }
 }
@@ -156,12 +156,17 @@ int ha_session_audit_perform_libipt_audit(ha_session_t session, const char *bina
     //Kickoff mirror decoding from our side
     session->on_block_function = libipt_audit_on_block;
     result = ha_mirror_block_decode(session);
-    if (result < 0 && result != -HA_PT_DECODER_END_OF_STREAM) {
+
+    //Figure out which result we want to end with. We want the EARLIEST error.
+    if (extra->status != HA_SESSION_AUDIT_TEST_PASS) {
+        result = extra->status;
+        goto CLEANUP;
+    } else if (result < 0 && result != -HA_PT_DECODER_END_OF_STREAM) {
         result = -HA_SESSION_AUDIT_TEST_HONEYBEE_ERROR;
         goto CLEANUP;
     }
 
-    result = extra->status;
+    result = HA_SESSION_AUDIT_TEST_PASS;
 
     CLEANUP:
     if (block_decoder) {

@@ -28,7 +28,7 @@ add_executable(honey_analyzer
         honey_analyzer/unit_testing/ha_session_audit.h
         honey_analyzer/trace_analysis/ha_session_internal.h)
 target_compile_options(honey_analyzer PRIVATE -masm=intel)
-target_compile_options(honey_analyzer PRIVATE -ftime-report)
+#target_compile_options(honey_analyzer PRIVATE -ftime-report)
 target_compile_options(honey_analyzer PRIVATE -Ofast)
 target_include_directories(honey_analyzer PRIVATE ${CMAKE_SOURCE_DIR}/dependencies/libipt/libipt/include)
 target_link_libraries(honey_analyzer ${CMAKE_SOURCE_DIR}/dependencies/libipt/lib/libipt.a)
