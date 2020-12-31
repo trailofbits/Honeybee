@@ -10,10 +10,10 @@
  */
 
 /** Controls debug logging in ha_pt_decoder */
-#define HA_ENABLE_DECODER_LOGS 1
+#define HA_ENABLE_DECODER_LOGS 0
 /** Controls debug logging in ha_pt_session */
-#define HA_ENABLE_ANALYSIS_LOGS 1
+#define HA_ENABLE_ANALYSIS_LOGS 0
 /** Controls block logging for both print blocks and unit tests. Disable this for performance tests. */
-#define HA_ENABLE_BLOCK_LEVEL_LOGS 1
+#define HA_ENABLE_BLOCK_LEVEL_LOGS 0
 
 #endif //HONEY_MIRROR_HA_DEBUG_SWITCH_H

@@ -10,52 +10,75 @@
 #include "processor_trace/ha_pt_decoder.h"
 
 #include "trace_analysis/ha_session.h"
-#include "testing/ha_session_audit.h"
+#include "unit_testing/ha_session_audit.h"
 
 #define TAG "[" __FILE__"] "
 
-int main(int argc, const char * argv[]) {
-//    printf(TAG "honey_analyzer testing shim :)\n");
-//    int opt = 0;
-//    while ((opt = getopt(argc, argv, "apsotb"))) {
-//        switch (opt) {
-//            case 'a':
-//                break;
-//            case 'p':
-//                break;
-//            case 's':
-//                break;
-//            case 'o':
-//                break;
-//            case 't':
-//                break;
-//            case 'b':
-//                break;
-//            default:
-//                printf(
-//                        "Usage:\n"
-//                        "-a Run a correctness audit using libipt\n"
-//                        "-p Run a performance test\n"
-//                        "-s The slid binary address according to sideband\n"
-//                        "-o The binary offset according to sideband\n"
-//                        "-t The Processor Trace file to decode\n"
-//                        "-b The binary to decode with. This is only used in libipt based tests!\n"
-//                );
-//                return 1;
-//        }
-//    }
+enum execution_task {EXECUTION_TASK_UNKNOWN, EXECUTION_TASK_AUDIT, EXECUTION_TASK_PERFORMANCE};
 
-//    if (argc != 5) {
-//        printf()
-//    }
-    /*
-     * testing constants
-     */
-    const char *trace_path = "/tmp/ptout.1";
-    const uint64_t slid_load_sideband_address = 0x400000;
-    const uint64_t binary_offset_sideband = 0;
-//    const uint64_t slid_load_sideband_address = 0x55555555d000;
-//    const uint64_t binary_offset_sideband = 36864;
+int main(int argc, const char * argv[]) {
+    char *end_ptr = NULL;
+    enum execution_task task = EXECUTION_TASK_UNKNOWN;
+    char *trace_path = NULL;
+    char *binary_path = NULL;
+    uint64_t slid_load_sideband_address = -1;
+    uint64_t binary_offset_sideband = -1;
+
+    int opt = 0;
+    while ((opt = getopt(argc, (char *const *) argv, "aps:o:t:b:")) != -1) {
+        switch (opt) {
+            case 'a':
+                task = EXECUTION_TASK_AUDIT;
+                break;
+            case 'p':
+                task = EXECUTION_TASK_PERFORMANCE;
+                break;
+            case 's':
+                slid_load_sideband_address = strtoull(optarg, &end_ptr, 16);
+                break;
+            case 'o':
+                binary_offset_sideband = strtoull(optarg, &end_ptr, 16);
+                break;
+            case 't':
+                trace_path = optarg;
+                break;
+            case 'b':
+                binary_path = optarg;
+                break;
+            default:
+            SHOW_USAGE:
+                printf(
+                        "                .' '.            __\n"
+                        "       .        .   .           (__\\_\n"
+                        "        .         .         . -{{_(|8)\n"
+                        "jgs       ' .  . ' ' .  . '     (__/\n\n"
+                        "honey_analyzer is a testing shim which allows for unit testing and various other debugging "
+                        "and development activities.\n"
+                        "Usage:\n"
+                        "-a Run a correctness audit using libipt\n"
+                        "-p Run a performance test\n"
+                        "-s The slid binary address according to sideband\n"
+                        "-o The binary offset according to sideband\n"
+                        "-t The Processor Trace file to decode\n"
+                        "-b The binary to decode with. This is only used in libipt based tests!\n"
+                );
+                return 1;
+        }
+    }
+
+    //Validate
+    if (!trace_path || slid_load_sideband_address == -1 || binary_offset_sideband == -1
+        || task == EXECUTION_TASK_UNKNOWN) {
+        printf(TAG "Required argument missing\n");
+        goto SHOW_USAGE;
+    }
+
+    if (task == EXECUTION_TASK_AUDIT && !binary_path) {
+        printf(TAG "Binary path is required for audits\n");
+        goto SHOW_USAGE;
+    }
+
+    /* arguments are valid */
 
     int result = HA_PT_DECODER_NO_ERROR;
     ha_session_t session = NULL;
@@ -68,8 +91,8 @@ int main(int argc, const char * argv[]) {
 
     uint64_t start = mach_absolute_time();
     uint64_t stop;
-    if (1) {
-        result = ha_session_audit_perform_libipt_audit(session, "/tmp/a.out");
+    if (task == EXECUTION_TASK_AUDIT) {
+        result = ha_session_audit_perform_libipt_audit(session, binary_path);
         stop = mach_absolute_time();
 
         if (result < 0) {
@@ -85,14 +108,14 @@ int main(int argc, const char * argv[]) {
             printf(TAG "decode error = %d\n", result);
         } else {
             printf(TAG "Decode success!\n");
+            result = 0;
         }
     }
-
 
     printf(TAG "Execute time = %llu ns\n", stop - start);
 
     /* Completed OK, clear the result if there is any */
     CLEANUP:
         ha_session_free(session);
-    return 0;
+    return -result;
 }
