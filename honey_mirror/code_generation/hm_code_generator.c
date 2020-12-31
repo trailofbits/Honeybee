@@ -65,13 +65,13 @@ int hm_code_generator_generate(const hm_disassembly_block *sorted_blocks, int64_
             "\tmov [rsp + 24], r15 #_ha_mirror_block_decode_ANY_JUMP, 3 bytes instead of 5.\n"
             "\tmov [rsp + 32], rbp #_ha_mirror_log_coverage, jmp rbp is just 2 bytes instead of 5.\n"
             "\tmov [rsp + 40], rbx #_ha_mirror_take_conditional_thunk, jmp rbx is just 2 instead of 5.\n"
+            "\tmov r11, 0 #init our virtual IP register\n"
             "\tmov r12, rdi #Stash our ha_session ptr\n"
             "\tlea r15, [rip + _ha_mirror_block_decode_ANY_JUMP]\n"
             "\tlea rbp, [rip + _ha_mirror_call_on_block_outlined]\n"
             "\tlea rbx, [rip + _ha_mirror_take_conditional_thunk]\n"
             "\t//We don't know where to start, ask the decoder\n"
-            "\tmov r11, 0 #init our virtual IP register"
-            "\tjmp r15 #_ha_mirror_block_decode_ANY_JUMP\n\n"
+            "\tjmp _ha_mirror_take_indirect_branch_thunk\n\n"
     );
 
     //Generate our cofi destination table

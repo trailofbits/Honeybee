@@ -31,14 +31,6 @@ void ha_session_free(ha_session_t session);
 int ha_session_generate_coverage(ha_session_t session);
 
 /**
- * Decode the trace using both the mirror and using libipt's block decoder and compare results.
- * This is useful for testing the correctness of mirrors.
- * @param binary_path The path to the binary used to create the mirror/this trace. This is used by libipt.
- * @return Non-zero if the mirror and libipt return different blocks
- */
-int ha_session_perform_libipt_audit(ha_session_t session, const char *binary_path);
-
-/**
  * Debug function. Walks the trace and dumps to the console.
  * @return Error code. On success, zero is returned
  */

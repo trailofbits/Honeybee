@@ -16,7 +16,7 @@ add_executable(honey_analyzer
         honey_analyzer/trace_analysis/ha_session.c
         honey_analyzer/trace_analysis/ha_session.h
         honey_analyzer/trace_analysis/ha_mirror_utils.h
-        honey_analyzer/trace_analysis/ha_mirror_utils.c honey_analyzer/processor_trace/ha_pt_decoder.c honey_analyzer/processor_trace/ha_pt_decoder.h)
+        honey_analyzer/trace_analysis/ha_mirror_utils.c honey_analyzer/processor_trace/ha_pt_decoder.c honey_analyzer/processor_trace/ha_pt_decoder.h honey_analyzer/ha_debug_switch.h honey_analyzer/testing/ha_session_audit.c honey_analyzer/testing/ha_session_audit.h honey_analyzer/trace_analysis/ha_session_internal.h)
 target_compile_options(honey_analyzer PRIVATE -masm=intel)
 target_compile_options(honey_analyzer PRIVATE -ftime-report)
 #target_compile_options(honey_analyzer PRIVATE -Ofast)

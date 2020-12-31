@@ -4,28 +4,56 @@
 
 #include <stdlib.h>
 #include <stdio.h>
-#include <string.h>
 #include <unistd.h>
-#include <sys/mman.h>
-#include <sys/stat.h>
-#include <fcntl.h>
-#include <stdbool.h>
 #include <mach/mach_time.h>
 
 #include "processor_trace/ha_pt_decoder.h"
 
 #include "trace_analysis/ha_session.h"
+#include "testing/ha_session_audit.h"
 
 #define TAG "[" __FILE__"] "
 
-int main() {
+int main(int argc, const char * argv[]) {
+//    printf(TAG "honey_analyzer testing shim :)\n");
+//    int opt = 0;
+//    while ((opt = getopt(argc, argv, "apsotb"))) {
+//        switch (opt) {
+//            case 'a':
+//                break;
+//            case 'p':
+//                break;
+//            case 's':
+//                break;
+//            case 'o':
+//                break;
+//            case 't':
+//                break;
+//            case 'b':
+//                break;
+//            default:
+//                printf(
+//                        "Usage:\n"
+//                        "-a Run a correctness audit using libipt\n"
+//                        "-p Run a performance test\n"
+//                        "-s The slid binary address according to sideband\n"
+//                        "-o The binary offset according to sideband\n"
+//                        "-t The Processor Trace file to decode\n"
+//                        "-b The binary to decode with. This is only used in libipt based tests!\n"
+//                );
+//                return 1;
+//        }
+//    }
 
+//    if (argc != 5) {
+//        printf()
+//    }
     /*
      * testing constants
      */
     const char *trace_path = "/tmp/ptout.1";
-    const uint64_t slid_load_sideband_address = 0x400000;
-    const uint64_t binary_offset_sideband = 0;
+    const uint64_t slid_load_sideband_address = 0x55555555d000;
+    const uint64_t binary_offset_sideband = 36864;
 
     int result = HA_PT_DECODER_NO_ERROR;
     ha_session_t session = NULL;
@@ -37,8 +65,8 @@ int main() {
     }
 
     uint64_t start = mach_absolute_time();
-    result = ha_session_print_trace(session);
-//    result = ha_session_perform_libipt_audit(session, "/tmp/a.out");
+//    result = ha_session_print_trace(session);
+    result = ha_session_audit_perform_libipt_audit(session, "/tmp/a.out");
     uint64_t stop = mach_absolute_time();
     printf(TAG "Trace time = %llu ns\n", stop - start);
     if (result < 0 && result != -HA_PT_DECODER_END_OF_STREAM) {

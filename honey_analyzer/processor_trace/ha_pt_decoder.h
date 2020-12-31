@@ -9,31 +9,51 @@
 typedef struct internal_ha_pt_decoder * ha_pt_decoder_t;
 
 typedef enum {
-    HA_PT_DECODER_NO_ERROR = 0, /* No error */
-    HA_PT_DECODER_END_OF_STREAM = 1, /* The trace ended. This is not an error but rather an indication to stop */
-    HA_PT_DECODER_INTERNAL = 2, /* idk */
-    HA_PT_DECODER_COULD_NOT_SYNC = 3, /* The requested PSB could not be found */
-    HA_PT_DECODER_TRACE_DESYNC = 4, /* An operation was requested which could not be completed given the trace */
-    HA_PT_UNSUPPORTED_TRACE_PACKET = 5, /* An unsupported packet was found in the PT stream. Trace abort. */
+    /** No error */
+    HA_PT_DECODER_NO_ERROR = 0,
+    /** The trace ended. This is not an error but rather an indication to stop */
+    HA_PT_DECODER_END_OF_STREAM = 1,
+    /** There was an internal decoder error. Probably not your fault. */
+    HA_PT_DECODER_INTERNAL = 2,
+    /** A sync operation failed because the target PSB could not be found. */
+    HA_PT_DECODER_COULD_NOT_SYNC = 3,
+    /**
+     * An operation was requested which could not be completed given the trace.
+     * This can mean one of three things:
+     * 1. The decoder is buggy
+     * 2. The analysis is buggy
+     * 3. The mapping between the binary and the decoder is incorrect (leading to bad analysis)
+     */
+    HA_PT_DECODER_TRACE_DESYNC = 4,
+    /** An unsupported packet was found in the PT stream. */
+    HA_PT_UNSUPPORTED_TRACE_PACKET = 5,
 } ha_pt_decoder_status;
 
+/** The number of elements our cache struct holds. This is a power of two so we can mask instead of modulo */
+#define HA_PT_DECODER_CACHE_TNT_COUNT (1LLU<<16U)
+#define HA_PT_DECODER_CACHE_TNT_COUNT_MASK (HA_PT_DECODER_CACHE_TNT_COUNT - 1)
 typedef struct {
-    /** If an indirect branch target is available, this field is non-zero. This may be an override. */
+    /** If an indirect branch target is available, this field is non-zero.*/
     uint64_t next_indirect_branch_target;
+    /** If an event provided a new target, it should be taken before the indirect branch as an override. */
     uint64_t override_target;
 
+    /*
+     * The TNT cache uses a technique where we allow the read and write indices to overflow. Since they are signed,
+     * this is defined. Since we define our cache size as a power of two, we can easily mask these values to get our
+     * fitting value. We do all of this since it greatly simplifies all operations without complicated pointer
+     * index arithmetic.
+     */
+
     /** The next index for the TNT */
-    uint64_t tnt_cache_index;
-
-    /** The total number of valid entries in the TNT cache */
-    uint64_t tnt_cache_count;
-
-    /* KEEPS THESE LAST FOR CACHE SAKE */
+    uint64_t tnt_cache_read;
+    /** The index to place the next TNT (i.e. there is no valid TNT here) */
+    uint64_t tnt_cache_write;
 
     /**
-     * The actual TNT cache. Index 0 is the first branch answer, etc.
+     * The actual TNT cache. TNT items are in a FIFO ringbuffer.
      */
-    uint8_t tnt_cache[1000];
+    int8_t tnt_cache[HA_PT_DECODER_CACHE_TNT_COUNT];
 } ha_pt_decoder_cache;
 
 /**
@@ -52,18 +72,52 @@ void ha_pt_decoder_reset(ha_pt_decoder_t decoder);
 /** Sync the decoder forwards towards the first PSB. Returns -ha_pt_decoder_status on error. */
 int ha_pt_decoder_sync_forward(ha_pt_decoder_t decoder);
 
-///** Get a pointer to the cache struct. You do not own this pointer, however you may consume data from it and should
-// * modify it
+/**
+ * Get a pointer to the cache struct. You do not own this pointer, however you may consume data from it and should
+ * update state appropriately using ha_pt_decoder_cache_xxxxxx methods.
+ */
 ha_pt_decoder_cache *ha_pt_decoder_get_cache_ptr(ha_pt_decoder_t decoder);
+
+/**
+ * Copies the internal trace buffer information. This is meant for testing, mostly.
+ */
+void ha_pt_decoder_internal_get_trace_buffer(ha_pt_decoder_t decoder, uint8_t **trace, uint64_t *trace_length);
 
 /** Runs the decode process until one of the two caches fills */
 int ha_pt_decoder_decode_until_caches_filled(ha_pt_decoder_t decoder);
 
 
-/* ha_pt_decoder_cache functions -- these are defined here for inline-ability */
 
 #define unlikely(x)     __builtin_expect((x),0)
-#define COUNT_OF(x) ((sizeof(x)/sizeof(0[x])) / ((size_t)(!(sizeof(x) % sizeof(0[x])))))
+
+/* ha_pt_decoder_cache */
+
+/** Is the TNT cache empty? */
+__attribute__((always_inline))
+static inline int ha_pt_decoder_cache_tnt_is_empty(ha_pt_decoder_cache *cache) {
+    return cache->tnt_cache_read == cache->tnt_cache_write;
+}
+
+/** Pushes a new TNT item to the end of the ringbuffer. Does not check for capacity. */
+__attribute__((always_inline))
+static inline void ha_pt_decoder_cache_tnt_push_back(ha_pt_decoder_cache *cache, uint8_t tnt) {
+    cache->tnt_cache[(cache->tnt_cache_write++) & HA_PT_DECODER_CACHE_TNT_COUNT_MASK] = tnt;
+}
+
+/** Pops the first TNT item from front of the ringbuffer. Does not check for availability. */
+__attribute__((always_inline))
+static inline uint8_t ha_pt_decoder_cache_tnt_pop(ha_pt_decoder_cache *cache) {
+    return cache->tnt_cache[(cache->tnt_cache_read++) & HA_PT_DECODER_CACHE_TNT_COUNT_MASK];
+}
+
+/** Returns the number of valid items in the ringbuffer. */
+__attribute__((always_inline))
+static inline uint64_t ha_pt_decoder_cache_tnt_count(ha_pt_decoder_cache *cache) {
+    //This may trigger an overflow, but in a defined and correct way
+    return cache->tnt_cache_write - cache->tnt_cache_read;
+}
+
+/* ha_pt_decoder functions -- these are defined here for inline-ability */
 
 /**
  * Query the decoder for the next TNT. This function will trigger additional analysis if necessary.
@@ -75,15 +129,15 @@ int ha_pt_decoder_decode_until_caches_filled(ha_pt_decoder_t decoder);
  __attribute__((always_inline))
 static inline int ha_pt_decoder_cache_query_tnt(ha_pt_decoder_t decoder, uint64_t *override) {
     ha_pt_decoder_cache *cache = ha_pt_decoder_get_cache_ptr(decoder);
-    if (unlikely(cache->tnt_cache_index >= cache->tnt_cache_count)) {
+    if (unlikely(ha_pt_decoder_cache_tnt_is_empty(cache))) {
         int refill_result = ha_pt_decoder_decode_until_caches_filled(decoder);
         if (unlikely(refill_result < 0 && refill_result != -HA_PT_DECODER_END_OF_STREAM)) {
             return refill_result;
         }
 
-        //We tried to refill the cache but no TNTs were returned. This indicates that the consumer consumed data from
-        // us in the wrong order.
-        if (unlikely(cache->tnt_cache_count == 0)) {
+        //We tried to refill the cache but no TNTs were returned.
+        //This indicates that the consumer consumed data from us in the wrong order.
+        if (unlikely(ha_pt_decoder_cache_tnt_is_empty(cache))) {
             if (cache->override_target) {
                 *override = cache->override_target;
                 cache->override_target = 0;
@@ -94,7 +148,7 @@ static inline int ha_pt_decoder_cache_query_tnt(ha_pt_decoder_t decoder, uint64_
         }
     }
 
-    return cache->tnt_cache[cache->tnt_cache_index++];
+    return ha_pt_decoder_cache_tnt_pop(cache);
 }
 
 /**
@@ -130,5 +184,5 @@ static inline int ha_pt_decoder_cache_query_indirect(ha_pt_decoder_t decoder, ui
 }
 
 #undef unlikely
-
+#undef HA_PT_DECODER_CACHE_TNT_COUNT_MASK
 #endif //HONEY_ANALYZER_HA_PT_DECODER_H

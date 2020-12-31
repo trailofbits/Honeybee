@@ -39,9 +39,13 @@ SOFTWARE.
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <stdbool.h>
+#include "../ha_debug_switch.h"
 
-//#define LOGGER(format, ...)  (void)0
+#if HA_ENABLE_DECODER_LOGS
 #define LOGGER(format, ...) (printf("[" __FILE__ "] " format, ##__VA_ARGS__))
+#else
+#define LOGGER(format, ...)  (void)0
+#endif
 #define likely(x)       __builtin_expect((x),1)
 #define unlikely(x)     __builtin_expect((x),0)
 
@@ -150,6 +154,9 @@ typedef struct internal_ha_pt_decoder {
     /** The last TIP. This is used for understanding future TIPs since they are masks on this value. */
     uint64_t last_tip;
 
+    /** Is the decoder currently decoding a PSB? */
+    uint64_t in_psb;
+
     /* KEEP THIS LAST FOR THE SAKE OF THE CACHE */
     /** The cache struct. This is exposed directly to clients. */
     ha_pt_decoder_cache cache;
@@ -235,6 +242,7 @@ void ha_pt_decoder_free(ha_pt_decoder_t decoder) {
 void ha_pt_decoder_reset(ha_pt_decoder_t decoder) {
     decoder->i_pt_buffer = decoder->pt_buffer;
     decoder->last_tip = 0;
+    decoder->in_psb = 0;
     bzero(&decoder->cache, sizeof(ha_pt_decoder_cache));
 }
 
@@ -253,27 +261,18 @@ int ha_pt_decoder_sync_forward(ha_pt_decoder_t decoder) {
     return HA_PT_DECODER_NO_ERROR;
 }
 
+void ha_pt_decoder_internal_get_trace_buffer(ha_pt_decoder_t decoder, uint8_t **trace, uint64_t *trace_length) {
+    *trace = decoder->pt_buffer;
+    *trace_length = decoder->pt_buffer_length;
+}
+
 /* *** Intel PT decode *** */
 
+/** Returns true if the TNT cache can accept more TNT packets safely. */
 __attribute__((always_inline))
-static inline void cache_push_tnt(ha_pt_decoder_t decoder, uint8_t tnt) {
-    decoder->cache.tnt_cache[decoder->cache.tnt_cache_count++] = tnt;
-}
-
-__attribute__((always_inline))
-static inline bool cache_is_tnt_cache_full(ha_pt_decoder_t decoder) {
-    //We subtract 47 from our capacity since a large TNT can have up to 47 and we don't want to go over
-    return decoder->cache.tnt_cache_count >= COUNT_OF(decoder->cache.tnt_cache) - 47;
-}
-
-static inline uint64_t cache_tnt_count(ha_pt_decoder_t decoder) {
-    return decoder->cache.tnt_cache_count - decoder->cache.tnt_cache_index;
-}
-
-__attribute__((always_inline))
-static inline void cache_purge_tnt(ha_pt_decoder_t decoder) {
-    decoder->cache.tnt_cache_count = 0;
-    decoder->cache.tnt_cache_index = 0;
+static inline bool is_tnt_cache_near_full(ha_pt_decoder_t decoder) {
+    //If we have fewer than 47 slots (aka the largest LTNT) we consider ourselves full so that we don't drop anything
+    return HA_PT_DECODER_CACHE_TNT_COUNT - ha_pt_decoder_cache_tnt_count(&decoder->cache) < 47;
 }
 
 
@@ -292,16 +291,17 @@ static inline uint64_t get_ip_val(uint8_t **pp, uint64_t *last_ip){
 
     return *last_ip;
 }
+
 static inline bool tip_handler(ha_pt_decoder_t decoder) {
     decoder->cache.next_indirect_branch_target = get_ip_val(&decoder->i_pt_buffer, &decoder->last_tip);
-    LOGGER("TIP    \t%p (TNT: %llu)\n", (void *)decoder->last_tip, cache_tnt_count(decoder));
+    LOGGER("TIP    \t%p (TNT: %llu)\n", (void *)decoder->last_tip, ha_pt_decoder_cache_tnt_count(&decoder->cache));
     return false;
 }
 
 static inline bool tip_pge_handler(ha_pt_decoder_t decoder) {
     uint64_t last = decoder->last_tip;
     uint64_t result = get_ip_val(&decoder->i_pt_buffer, &decoder->last_tip);
-    LOGGER("PGE    \t%p (TNT: %llu)\n", (void *)decoder->last_tip, cache_tnt_count(decoder));
+    LOGGER("PGE    \t%p (TNT: %llu)\n", (void *)decoder->last_tip, ha_pt_decoder_cache_tnt_count(&decoder->cache));
 
     if (likely(last != result)) {
         decoder->cache.override_target = result;
@@ -313,15 +313,25 @@ static inline bool tip_pge_handler(ha_pt_decoder_t decoder) {
 
 static inline bool tip_pgd_handler(ha_pt_decoder_t decoder) {
     get_ip_val(&decoder->i_pt_buffer, &decoder->last_tip);
-    LOGGER("PGD    \t%p (TNT: %llu)\n", (void *)decoder->last_tip, cache_tnt_count(decoder));
+    LOGGER("PGD    \t%p (TNT: %llu)\n", (void *)decoder->last_tip, ha_pt_decoder_cache_tnt_count(&decoder->cache));
     return true;
 }
 
 static inline bool tip_fup_handler(ha_pt_decoder_t decoder) {
+    uint64_t last = decoder->last_tip;
     uint64_t res = get_ip_val(&decoder->i_pt_buffer, &decoder->last_tip);
-    decoder->cache.override_target = res;
-    LOGGER("FUP    \t%p (TNT: %llu)\n", (void *)decoder->last_tip, cache_tnt_count(decoder));
-    return false;
+
+    LOGGER("FUP    \t%p (TNT: %llu)\n", (void *)decoder->last_tip, ha_pt_decoder_cache_tnt_count(&decoder->cache));
+
+    //We do not emit an FUP if the last override was the same address.
+    //FIXME: This is likely not correct, it's just a way to block the PGE and then a random useless duplication FUP
+    if (likely(res != last)) {
+        decoder->cache.override_target = res & ~decoder->in_psb; //in_psb is a full register mask. Ignore FUPs in PSBs.
+        return decoder->in_psb;
+    } else {
+        //Block it.
+        return true;
+    }
 }
 
 static inline uint8_t asm_bsr(uint64_t x){
@@ -333,10 +343,10 @@ static inline bool append_tnt_cache(ha_pt_decoder_t decoder, uint8_t data) {
     uint8_t bits = asm_bsr(data)-SHORT_TNT_OFFSET;
     for (int16_t i = bits + SHORT_TNT_OFFSET - 1; i >= SHORT_TNT_OFFSET; i--) {
         uint8_t b = (data >> i) & 0b1;
-        cache_push_tnt(decoder, b);
+        ha_pt_decoder_cache_tnt_push_back(&decoder->cache, b);
     }
 
-    return !cache_is_tnt_cache_full(decoder);
+    return !is_tnt_cache_near_full(decoder);
 }
 
 __attribute__((always_inline))
@@ -344,10 +354,10 @@ static inline bool append_tnt_cache_ltnt(ha_pt_decoder_t decoder, uint64_t data)
     uint8_t bits = asm_bsr(data)-LONG_TNT_MAX_BITS;
     for (int16_t i = bits + LONG_TNT_MAX_BITS - 1; i >= LONG_TNT_MAX_BITS; i--) {
         uint8_t b = (data >> i) & 0b1;
-        cache_push_tnt(decoder, b);
+        ha_pt_decoder_cache_tnt_push_back(&decoder->cache, b);
     }
 
-    return !cache_is_tnt_cache_full(decoder);
+    return !is_tnt_cache_near_full(decoder);
 }
 
 
@@ -658,11 +668,13 @@ int ha_pt_decoder_decode_until_caches_filled(ha_pt_decoder_t decoder) {
         case __extension__ 0b00100011:    /* PSBEND */
             decoder->i_pt_buffer += PT_PKT_PSBEND_LEN;
             LOGGER("PSBEND\n");
+            decoder->in_psb = 0;
             DISPATCH_L1();
 
         case __extension__ 0b10000010:    /* PSB */
             decoder->i_pt_buffer += PT_PKT_PSB_LEN;
             LOGGER("PSB\n");
+            decoder->in_psb = -1; /* all ones so it can be used as a mask */
             DISPATCH_L1();
 
         case __extension__ 0b10100011:    /* LTNT */
