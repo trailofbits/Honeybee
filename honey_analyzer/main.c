@@ -52,8 +52,10 @@ int main(int argc, const char * argv[]) {
      * testing constants
      */
     const char *trace_path = "/tmp/ptout.1";
-    const uint64_t slid_load_sideband_address = 0x55555555d000;
-    const uint64_t binary_offset_sideband = 36864;
+    const uint64_t slid_load_sideband_address = 0x400000;
+    const uint64_t binary_offset_sideband = 0;
+//    const uint64_t slid_load_sideband_address = 0x55555555d000;
+//    const uint64_t binary_offset_sideband = 36864;
 
     int result = HA_PT_DECODER_NO_ERROR;
     ha_session_t session = NULL;
@@ -65,14 +67,29 @@ int main(int argc, const char * argv[]) {
     }
 
     uint64_t start = mach_absolute_time();
-//    result = ha_session_print_trace(session);
-    result = ha_session_audit_perform_libipt_audit(session, "/tmp/a.out");
-    uint64_t stop = mach_absolute_time();
-    printf(TAG "Trace time = %llu ns\n", stop - start);
-    if (result < 0 && result != -HA_PT_DECODER_END_OF_STREAM) {
-        printf("decode error = %d\n", result);
+    uint64_t stop;
+    if (1) {
+        result = ha_session_audit_perform_libipt_audit(session, "/tmp/a.out");
+        stop = mach_absolute_time();
+
+        if (result < 0) {
+            printf(TAG "Test failure = %d\n", result);
+        } else {
+            printf(TAG "Test pass!\n");
+        }
+    } else {
+        result = ha_session_print_trace(session);
+        stop = mach_absolute_time();
+
+        if (result < 0 && result != -HA_PT_DECODER_END_OF_STREAM) {
+            printf(TAG "decode error = %d\n", result);
+        } else {
+            printf(TAG "Decode success!\n");
+        }
     }
-    printf(TAG "Decoding complete!\n");
+
+
+    printf(TAG "Execute time = %llu ns\n", stop - start);
 
     /* Completed OK, clear the result if there is any */
     CLEANUP:

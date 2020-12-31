@@ -318,20 +318,21 @@ static inline bool tip_pgd_handler(ha_pt_decoder_t decoder) {
 }
 
 static inline bool tip_fup_handler(ha_pt_decoder_t decoder) {
-    uint64_t last = decoder->last_tip;
+//    uint64_t last = decoder->last_tip;
     uint64_t res = get_ip_val(&decoder->i_pt_buffer, &decoder->last_tip);
 
     LOGGER("FUP    \t%p (TNT: %llu)\n", (void *)decoder->last_tip, ha_pt_decoder_cache_tnt_count(&decoder->cache));
-
-    //We do not emit an FUP if the last override was the same address.
-    //FIXME: This is likely not correct, it's just a way to block the PGE and then a random useless duplication FUP
-    if (likely(res != last)) {
-        decoder->cache.override_target = res & ~decoder->in_psb; //in_psb is a full register mask. Ignore FUPs in PSBs.
-        return decoder->in_psb;
-    } else {
-        //Block it.
-        return true;
-    }
+    //FIXME: ...do FUPs not matter? Enabling them actually CAUSES issues
+    return true;
+//    //We do not emit an FUP if the last override was the same address.
+//    //FIXME: This is likely not correct, it's just a way to block the PGE and then a random useless duplication FUP
+//    if (likely(res != last)) {
+//        decoder->cache.override_target = res & ~decoder->in_psb; //in_psb is a full register mask. Ignore FUPs in PSBs.
+//        return decoder->in_psb;
+//    } else {
+//        //Block it.
+//        return true;
+//    }
 }
 
 static inline uint8_t asm_bsr(uint64_t x){
