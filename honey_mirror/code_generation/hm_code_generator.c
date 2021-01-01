@@ -91,9 +91,11 @@ int hm_code_generator_generate(const hm_disassembly_block *sorted_blocks, int64_
             "\t\tcmp rsi, %llu //Check if our index is in bounds. We use an unsigned compare to catch negatives.\n"
             "\t\tjae _ha_mirror_block_decode_INVALID_ADDRESS\n"
             "\t\tlea rdi, [_ha_mirror_direct_map + rip]\n"
-            "\t\tmov esi, dword ptr [rdi + 4 * rsi]\n"
-            "\t\tlea rdi, [rip + _ha_mirror_block_decode_JUMP_VIRTUAL]\n"
-            "\t\tadd rsi, rdi\n"
+            "\t\tlea rax, [_ha_mirror_id_to_offset_map + rip]\n"
+            "\t\tmovsxd rsi, dword ptr [rdi + 4 * rsi]\n"
+            "\t\tmovsxd rsi, dword ptr [rax + 4 * rsi]\n"
+            "\t\tlea rcx, [rip + _ha_mirror_block_decode_JUMP_VIRTUAL]\n"
+            "\t\tadd rsi, rcx\n"
             "\t\tjmp rsi\n\n"
 
             //This handler is hit when the direct map lands on an invalid address
@@ -186,31 +188,47 @@ int hm_code_generator_generate(const hm_disassembly_block *sorted_blocks, int64_
             "\tadd rsp, 56\n"
             "\tret\n\n");
 
-    /* write the floor unslide-ip to label data table */
+    /*
+     * The mapping structure is a two table pair
+     * This is done because the linker gives up on us if we have too many relocations and so we have to be somewhat
+     * conservative about how we use them
+     */
+
     fprintf(fp, ".data\n"
-                "_ha_mirror_direct_map:\n");
+                "_ha_mirror_id_to_offset_map:\n"
+                ".long _ha_mirror_block_decode_INVALID_ADDRESS - _ha_mirror_block_decode_JUMP_VIRTUAL //0\n"
+                ".long _ha_mirror_block_decode_ANY_JUMP - _ha_mirror_block_decode_JUMP_VIRTUAL //1\n"
+                );
+    bool last_was_indirect = false;
+    for (int64_t i = 0; i < block_count; i++) {
+        const hm_disassembly_block *block = sorted_blocks + i;
+        bool is_indirect = cofi_destination_block_indexes[i] < 0;
+        if (!is_indirect) {
+            fprintf(fp, ".long _%p - _ha_mirror_block_decode_JUMP_VIRTUAL\n", (void *) block->start_offset);
+        }
+    }
 
-
+    /* write the floor unslide-ip to label data table */
+    fprintf(fp, "_ha_mirror_direct_map:\n");
+    uint32_t offset_map_index = 2;
     uint64_t last_block_ip = sorted_blocks[0].start_offset;
     for (int64_t i = 0; i < block_count; i++) {
         const hm_disassembly_block *block = sorted_blocks + i;
+        bool is_indirect = cofi_destination_block_indexes[i] < 0;
+
         uint64_t invalid_count = block->start_offset - last_block_ip;
         uint64_t this_block_count = block->length + block->last_instruction_size;
-        fprintf(fp,
-                ".rept %llu\n"
-                ".long _ha_mirror_block_decode_INVALID_ADDRESS - _ha_mirror_block_decode_JUMP_VIRTUAL\n"
-                ".endr\n"
-                ".rept %llu\n",
-                invalid_count, this_block_count);
+        //invalid
+        fprintf(fp, ".fill %llu, 4, 0\n", invalid_count);
         last_block_ip = block->start_offset + this_block_count;
 
-        bool is_indirect = cofi_destination_block_indexes[i] < 0;
         if (is_indirect) {
-            fprintf(fp, ".long _ha_mirror_block_decode_ANY_JUMP - _ha_mirror_block_decode_JUMP_VIRTUAL\n");
+            //any jump
+            fprintf(fp, ".fill %llu, 4, 1\n", this_block_count);
         } else {
-            fprintf(fp, ".long _%p - _ha_mirror_block_decode_JUMP_VIRTUAL\n", (void *) block->start_offset);
+            fprintf(fp, ".fill %llu, 4, %u\n", this_block_count, offset_map_index);
+            offset_map_index++;
         }
-        fprintf(fp, ".endr\n");
     }
 
     fprintf(fp,

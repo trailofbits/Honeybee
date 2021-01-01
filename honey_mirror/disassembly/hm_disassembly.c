@@ -149,9 +149,18 @@ bool hm_disassembly_get_blocks_from_elf(const char *path, hm_disassembly_block *
             xed_decoded_inst_zero_set_mode(&xedd, &dstate);
             result = xed_decode(&xedd, text_segment + text_segment_offset, sb.st_size - text_segment_offset);
             if (result != XED_ERROR_NONE) {
-                printf(TAG "XED decode error! %s -> %p\n", xed_error_enum_t2str(result), (void *) insn_va);
-                break;
+                //Try and just length decode it. Complicated weird instructions can't be decoded by xed but ild can
+                // handle them.
+                xed_decoded_inst_zero_set_mode(&xedd, &dstate);
+                result = xed_ild_decode(&xedd,text_segment + text_segment_offset, sb.st_size - text_segment_offset);
+                if (result != XED_ERROR_NONE) {
+                    printf(TAG "XED total decode error! %s -> %p\n", xed_error_enum_t2str(result), (void *) insn_va);
+                    break;
+                }
+                text_segment_offset += xed_decoded_inst_get_length(&xedd);
+                continue;
             }
+
 
             uint32_t insn_length = xed_decoded_inst_get_length(&xedd);
             xed_category_enum_t category = xed_decoded_inst_get_category(&xedd);
