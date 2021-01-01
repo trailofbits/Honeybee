@@ -69,8 +69,8 @@ static void libipt_audit_on_block(ha_session_t session, uint64_t mirror_unslid_i
 #if HA_ENABLE_BLOCK_LEVEL_LOGS
         printf(TAG "PASS! mirror = %p, libipt = %p.\n", (void *)mirror_unslid_ip, (void *)libipt_unslid);
 #endif
-    } else if (extra->last_libipt_ip && ha_mirror_utils_convert_unslid_to_code(libipt_unslid)
-        == ha_mirror_utils_convert_unslid_to_code(extra->last_libipt_ip)) {
+    } else if (extra->last_libipt_ip && ha_mirror_utils_convert_unslid_to_offset(libipt_unslid)
+        == ha_mirror_utils_convert_unslid_to_offset(extra->last_libipt_ip)) {
         //We have a split block
 #if HA_ENABLE_BLOCK_LEVEL_LOGS
         printf(TAG "\tDetected libipt splitting last block %p to %p due to an FUP. Trying again!\n",

@@ -49,12 +49,20 @@ int hm_code_generator_generate(const hm_disassembly_block *sorted_blocks, int64_
         goto CLEANUP;
     }
 
+    uint64_t direct_map_count;
+    {
+        const hm_disassembly_block *last_block = &sorted_blocks[block_count - 1];
+        direct_map_count = last_block->start_offset + last_block->length + last_block->last_instruction_size
+                - sorted_blocks[0].start_offset;
+    };
+
+
     //Write out the asm header
     fprintf(fp,
             ".intel_syntax noprefix\n"
             ".text\n"
-            ".globl _ha_mirror_block_decode, _ha_mirror_block_decode_CLEANUP, _ha_mirror_unslid_virtual_ip_to_text, "
-            "_ha_mirror_unslid_virtual_ip_to_text_count\n"
+            ".globl _ha_mirror_block_decode, _ha_mirror_block_decode_CLEANUP, _ha_mirror_block_decode_JUMP_VIRTUAL, "
+            "_ha_mirror_direct_map, _ha_mirror_direct_map_count, _ha_mirror_direct_map_address_slide\n"
             "_ha_mirror_block_decode:\n"
             "\t#Epilogue\n"
             "\tsub  rsp, 56\n"
@@ -72,6 +80,33 @@ int hm_code_generator_generate(const hm_disassembly_block *sorted_blocks, int64_
             "\tlea rbx, [rip + _ha_mirror_take_conditional_thunk]\n"
             "\t//We don't know where to start, ask the decoder\n"
             "\tjmp _ha_mirror_take_indirect_branch_thunk\n\n"
+
+            //This thunk reroutes us using a slid r11 VIP
+            //Invalid IPs that are in-range redirect to the invalid address handler
+            //Invalid IPs that are out of range redirect to the invalid address handler
+            "\t_ha_mirror_block_decode_JUMP_VIRTUAL:\n"
+            "\t\t//The register we want to jump to is in r11, use the direct map to get to the segment\n"
+            "\t\tmov rsi, r11\n"
+            "\t\tsub rsi, %llu //Shift our VIP to the index of our table\n"
+            "\t\tcmp rsi, %llu //Check if our index is in bounds. We use an unsigned compare to catch negatives.\n"
+            "\t\tjae _ha_mirror_block_decode_INVALID_ADDRESS\n"
+            "\t\tlea rdi, [_ha_mirror_direct_map + rip]\n"
+            "\t\tmov esi, dword ptr [rdi + 4 * rsi]\n"
+            "\t\tlea rdi, [rip + _ha_mirror_block_decode_JUMP_VIRTUAL]\n"
+            "\t\tadd rsi, rdi\n"
+            "\t\tjmp rsi\n\n"
+
+            //This handler is hit when the direct map lands on an invalid address
+            "\t_ha_mirror_block_decode_INVALID_ADDRESS:\n"
+            "\t\tmov rax, -6 //HA_PT_DECODER_TRACE_DESYNC\n"
+            "\t\tjmp _ha_mirror_block_decode_CLEANUP\n\n"
+
+            //We use a shared "any jump" procedure for all indirect branches since they're the same except with a different
+            // r11. For performance and code size reasons, we merge them all.
+            "\t_ha_mirror_block_decode_ANY_JUMP:\n"
+            "\t\tcall rbp #_log_coverage\n"
+            "\t\tjmp _ha_mirror_take_indirect_branch_thunk\n",
+            sorted_blocks[0].start_offset, direct_map_count
     );
 
     //Generate our cofi destination table
@@ -87,15 +122,6 @@ int hm_code_generator_generate(const hm_disassembly_block *sorted_blocks, int64_
             cofi_destination_block_indexes[i] = next_block_i;
         }
     }
-
-
-    //We use a shared "any jump" procedure for all indirect branches since they're the same except with a different
-    // r11. For performance and code size reasons, we merge them all.
-    fprintf(fp,
-            "\t_ha_mirror_block_decode_ANY_JUMP:\n"
-            "\t\tcall rbp #_log_coverage\n"
-            "\t\tjmp _ha_mirror_take_indirect_branch_thunk\n"
-            );
 
     //Write out all other blocks
     for (int64_t i = 0; i < block_count; i++) {
@@ -162,45 +188,37 @@ int hm_code_generator_generate(const hm_disassembly_block *sorted_blocks, int64_
 
     /* write the floor unslide-ip to label data table */
     fprintf(fp, ".data\n"
-                "_ha_mirror_unslid_virtual_ip_to_text:\n");
+                "_ha_mirror_direct_map:\n");
 
-    //We can shrink the number of items in our table by joining contiguous indirect blocks (since they all go to the
-    // same location).
-    bool last_was_indirect = false;
-    int64_t table_true_count = 0;
+
+    uint64_t last_block_ip = sorted_blocks[0].start_offset;
     for (int64_t i = 0; i < block_count; i++) {
         const hm_disassembly_block *block = sorted_blocks + i;
+        uint64_t invalid_count = block->start_offset - last_block_ip;
+        uint64_t this_block_count = block->length + block->last_instruction_size;
+        fprintf(fp,
+                ".rept %llu\n"
+                ".long _ha_mirror_block_decode_INVALID_ADDRESS - _ha_mirror_block_decode_JUMP_VIRTUAL\n"
+                ".endr\n"
+                ".rept %llu\n",
+                invalid_count, this_block_count);
+        last_block_ip = block->start_offset + this_block_count;
+
         bool is_indirect = cofi_destination_block_indexes[i] < 0;
-        if (!last_was_indirect /* if the last wasn't indirect, we have to emit as we have nobody to join to */
-            || !is_indirect /* if we aren't indirect we have to emit */
-            ) {
-            fprintf(fp, ".quad %p\n", (void *) block->start_offset);
-
-            if (is_indirect) {
-                fprintf(fp, ".quad _ha_mirror_block_decode_ANY_JUMP\n");
-            } else {
-                fprintf(fp, ".quad _%p\n", (void *) block->start_offset);
-            }
-
-            last_was_indirect = is_indirect;
-            table_true_count++;
+        if (is_indirect) {
+            fprintf(fp, ".long _ha_mirror_block_decode_ANY_JUMP - _ha_mirror_block_decode_JUMP_VIRTUAL\n");
+        } else {
+            fprintf(fp, ".long _%p - _ha_mirror_block_decode_JUMP_VIRTUAL\n", (void *) block->start_offset);
         }
+        fprintf(fp, ".endr\n");
     }
 
-    //Add a final entry with max values
-    //We do this so that we can safely lookup the ""size"" of any entry without doing a bounds check
-    //The last entry will just be ridiculously large, but this doesn't matter since we use this to floor
     fprintf(fp,
-            ".quad %p\n"
-            ".quad %p\n"
-            "_ha_mirror_unslid_virtual_ip_to_text_count:\n"
-            ".quad %p\n"
-            "_ha_mirror_real_basic_block_count:\n"
-            ".quad %p\n",
-            (void *) UINT64_MAX,
-            (void *) UINT64_MAX,
-            (void *)table_true_count,
-            (void *)block_count);
+            "_ha_mirror_direct_map_count:\n"
+            ".quad %llu\n"
+            "_ha_mirror_direct_map_address_slide:\n"
+            ".quad %llu\n"
+            , direct_map_count, sorted_blocks[0].start_offset);
 
     CLEANUP:
     if (fp) {

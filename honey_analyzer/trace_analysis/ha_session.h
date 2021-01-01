@@ -46,7 +46,7 @@ int ha_session_print_trace(ha_session_t session);
  * @param override_code_location  The location to place the new __TEXT location for the next decoder block
  * @return A libipt error code. On error, override_ip and override_code_location are undefined
  */
-int ha_session_take_indirect_branch(ha_session_t session, uint64_t *override_ip, uint64_t *override_code_location)
+int ha_session_take_indirect_branch(ha_session_t session, uint64_t *override_ip)
     asm("_ha_session_take_indirect_branch");
 
 /**
@@ -59,7 +59,7 @@ int ha_session_take_indirect_branch(ha_session_t session, uint64_t *override_ip,
  * @return A negative value indicates a libipt error. A value of 0 indicates the branch was not taken. A value of 1
  * indicates that the branch was taken. A value of 0x3 indicates an override update.
  */
-int ha_session_take_conditional(ha_session_t session, uint64_t *override_ip, uint64_t *override_code_location)
+int ha_session_take_conditional(ha_session_t session, uint64_t *override_ip)
     asm("_ha_session_take_conditional");
 
 

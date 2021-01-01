@@ -20,25 +20,30 @@ typedef void (ha_mirror_on_block_function)(ha_session_t session, uint64_t unslid
 extern int ha_mirror_block_decode(ha_session_t session) asm ("_ha_mirror_block_decode");
 
 /**
- * The mirror contains an un-slid virtual IP to __TEXT map.
- * This item is the first element of that table. Take the address of this to get a pointer to the table.
- * The table is laid out in memory as (K,V,K,V...). There are ha_mirror_unslid_virtual_ip_to_text_count real items in
- * the table, but there is an additional fake "max item" added to the end which is greater than all elements in the
- * table.
+ * The mirror contains a 1:1 mapping of each byte of code to a __TEXT offset.
+ * These offsets cannot be understood/used in C, however the values may still be used for testing
  */
-extern uint64_t ha_mirror_unslid_virtual_ip_to_text_START asm("_ha_mirror_unslid_virtual_ip_to_text");
+extern uint32_t ha_mirror_direct_map_START asm("_ha_mirror_direct_map");
 
 /**
- * The number of K,V pairs in the table. Does not include the maximum pair.
+ * The number of entries in the table.
  */
-extern uint64_t ha_mirror_unslid_virtual_ip_to_text_count asm("_ha_mirror_unslid_virtual_ip_to_text_count");
+extern uint64_t ha_mirror_direct_map_count asm("_ha_mirror_direct_map_count");
 
 /**
- * For a given un-slid virtual IP, fetch the corresponding decoder block in the __TEXT segment
+ * The value by which each slid virtual IP is re-slid to get the index.
+ * Subtract this value from a slid virtual IP to get the direct map index.
+ */
+extern uint64_t ha_mirror_direct_map_address_slide asm("_ha_mirror_direct_map_address_slide");
+
+
+/**
+ * For a given un-slid virtual IP, fetch the corresponding __TEXT offset
  * @param unslid_ip The unslid IP
- * @return The address of the decoder block or NULL if not found.
+ * @return The offset UINT64_MAX if not found.
  */
-uint64_t ha_mirror_utils_convert_unslid_to_code(uint64_t unslid_ip) asm("_ha_mirror_utils_convert_unslid_to_code");
+uint64_t ha_mirror_utils_convert_unslid_to_offset(uint64_t unslid_ip);
+
 
 
 #endif //HONEY_ANALYSIS_HA_MIRROR_UTILS_H

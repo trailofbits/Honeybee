@@ -5,7 +5,8 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <unistd.h>
-#include <mach/mach_time.h>
+#include <stdint.h>
+#include <time.h>
 
 #include "processor_trace/ha_pt_decoder.h"
 
@@ -15,6 +16,13 @@
 #define TAG "[" __FILE__"] "
 
 enum execution_task {EXECUTION_TASK_UNKNOWN, EXECUTION_TASK_AUDIT, EXECUTION_TASK_PERFORMANCE};
+
+long current_clock() {
+    struct timespec tv;
+    clock_gettime(CLOCK_MONOTONIC_RAW, &tv);
+
+    return tv.tv_sec * 1e9 + tv.tv_nsec;
+}
 
 int main(int argc, const char * argv[]) {
     char *end_ptr = NULL;
@@ -89,11 +97,11 @@ int main(int argc, const char * argv[]) {
         goto CLEANUP;
     }
 
-    uint64_t start = mach_absolute_time();
+    uint64_t start = current_clock();
     uint64_t stop;
     if (task == EXECUTION_TASK_AUDIT) {
         result = ha_session_audit_perform_libipt_audit(session, binary_path);
-        stop = mach_absolute_time();
+        stop = current_clock();
 
         if (result < 0) {
             printf(TAG "Test failure = %d\n", result);
@@ -102,7 +110,7 @@ int main(int argc, const char * argv[]) {
         }
     } else {
         result = ha_session_print_trace(session);
-        stop = mach_absolute_time();
+        stop = current_clock();
 
         if (result < 0 && result != -HA_PT_DECODER_END_OF_STREAM) {
             printf(TAG "decode error = %d\n", result);

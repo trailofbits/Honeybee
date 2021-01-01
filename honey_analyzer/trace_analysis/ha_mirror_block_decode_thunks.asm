@@ -24,9 +24,7 @@ _ha_mirror_take_conditional_thunk:
     mov [rsp], rdi //We stash rdi (the NT virtual IP) as a hack. Since take_conditional_c does not write here on override, it'll be there if we need it and not there if we don't. This frees up a register.
     mov rdi, r12 //ha_session ptr
     mov rsi, rsp //ptr to override_ip
-
     mov [rsp + 8], r11 //We stash r11 (the T virtual IP) as a hack. Same as above.
-    lea rdx, [rsp + 8] //ptr to override_code_location
 
     call _ha_session_take_conditional
 
@@ -51,9 +49,8 @@ _ha_mirror_take_conditional_thunk:
 
     _ha_mirror_take_conditional_INFLIGHT_EVENT:
     //We already unpacked unslid_ip (which the C code updated for us) so we just need our jump addr
-    mov rax, r11 //override_code_location
     mov r11, rdi //unpack our override_ip into our virtual IP
-    jmp rax //jump to our override_code_location
+    jmp _ha_mirror_block_decode_JUMP_VIRTUAL //jump to our override_code_location
 
 /*
 This is a thunk which quieries the decoder for a new virtual IP, places it in r11, and then jumps to the
@@ -71,16 +68,15 @@ _ha_mirror_take_indirect_branch_thunk:
     mov rdi, r12 //ha_session ptr
     mov [rsp], r11
     mov rsi, rsp // override_ip ptr
-    lea rdx, [rsp + 8] //override_code_location ptr
     call _ha_session_take_indirect_branch
-    mov r11, [rsp + 0]
-    mov rdi, [rsp + 8]
+    mov r11, [rsp + 0] //unpack our IP
 
     add rsp, 16
 
     test ax, ax
     js _ha_mirror_block_decode_CLEANUP //if we have a negative status code we need to terminate (might just be EOS). Leave in rax.
-    jmp rdi
+    //Jump to our routing table
+    jmp _ha_mirror_block_decode_JUMP_VIRTUAL
 
 _ha_mirror_call_on_block_outlined:
     sub rsp, 8

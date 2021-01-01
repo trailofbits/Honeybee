@@ -70,18 +70,13 @@ void ha_session_free(ha_session_t session) {
     free(session);
 }
 
-int ha_session_take_indirect_branch(ha_session_t session, uint64_t *override_ip, uint64_t *override_code_location) {
+int ha_session_take_indirect_branch(ha_session_t session, uint64_t *override_ip) {
     int result = ha_pt_decoder_cache_query_indirect(session->decoder, override_ip);
     if (result < 0) {
         return result;
     }
 
     *override_ip -= session->binary_slide;
-    *override_code_location = ha_mirror_utils_convert_unslid_to_code(*override_ip);
-    if (!*override_code_location) {
-        return -1;
-    }
-
 
 #if HA_ENABLE_ANALYSIS_LOGS
     if (result == 1) {
@@ -94,16 +89,11 @@ int ha_session_take_indirect_branch(ha_session_t session, uint64_t *override_ip,
     return 0;
 }
 
-int ha_session_take_conditional(ha_session_t session, uint64_t *override_ip, uint64_t *override_code_location) {
+int ha_session_take_conditional(ha_session_t session, uint64_t *override_ip) {
     int taken = ha_pt_decoder_cache_query_tnt(session->decoder, override_ip);
     if (taken == 2) {
         //Override
         *override_ip -= session->binary_slide;
-        *override_code_location = ha_mirror_utils_convert_unslid_to_code(*override_ip);
-
-        if (!*override_code_location) {
-            return -1;
-        }
 
 #if HA_ENABLE_ANALYSIS_LOGS
         printf(TAG "\tasync event update, switching to %p\n", (void *)*override_ip);
