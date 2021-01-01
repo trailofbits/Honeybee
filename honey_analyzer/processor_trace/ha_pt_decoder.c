@@ -154,8 +154,8 @@ typedef struct internal_ha_pt_decoder {
     /** The last TIP. This is used for understanding future TIPs since they are masks on this value. */
     uint64_t last_tip;
 
-    /** Is the decoder currently decoding a PSB? */
-    uint64_t in_psb;
+    /** Do we have an unresolved OVF packet? */
+    uint64_t is_in_ovf_state;
 
     /* KEEP THIS LAST FOR THE SAKE OF THE CACHE */
     /** The cache struct. This is exposed directly to clients. */
@@ -242,7 +242,7 @@ void ha_pt_decoder_free(ha_pt_decoder_t decoder) {
 void ha_pt_decoder_reset(ha_pt_decoder_t decoder) {
     decoder->i_pt_buffer = decoder->pt_buffer;
     decoder->last_tip = 0;
-    decoder->in_psb = 0;
+    decoder->is_in_ovf_state = 0;
     bzero(&decoder->cache, sizeof(ha_pt_decoder_cache));
 }
 
@@ -275,7 +275,7 @@ static inline bool is_tnt_cache_near_full(ha_pt_decoder_t decoder) {
     return HA_PT_DECODER_CACHE_TNT_COUNT - ha_pt_decoder_cache_tnt_count(&decoder->cache) < 47;
 }
 
-
+__attribute__((always_inline))
 static inline uint64_t get_ip_val(uint8_t **pp, uint64_t *last_ip){
     register uint8_t len = (*(*pp)++ >> PT_PKT_TIP_SHIFT);
     if(unlikely(!len))
@@ -292,16 +292,20 @@ static inline uint64_t get_ip_val(uint8_t **pp, uint64_t *last_ip){
     return *last_ip;
 }
 
+__attribute__((always_inline))
 static inline bool tip_handler(ha_pt_decoder_t decoder) {
     decoder->cache.next_indirect_branch_target = get_ip_val(&decoder->i_pt_buffer, &decoder->last_tip);
     LOGGER("TIP    \t%p (TNT: %llu)\n", (void *)decoder->last_tip, ha_pt_decoder_cache_tnt_count(&decoder->cache));
     return false;
 }
 
+__attribute__((always_inline))
 static inline bool tip_pge_handler(ha_pt_decoder_t decoder) {
     uint64_t last = decoder->last_tip;
     uint64_t result = get_ip_val(&decoder->i_pt_buffer, &decoder->last_tip);
     LOGGER("PGE    \t%p (TNT: %llu)\n", (void *)decoder->last_tip, ha_pt_decoder_cache_tnt_count(&decoder->cache));
+    //We clear OVF state on PGE because it means that we have a new starting address and so will not take the FUP.
+    decoder->is_in_ovf_state = 0;
 
     if (likely(last != result)) {
         decoder->cache.override_target = result;
@@ -311,28 +315,36 @@ static inline bool tip_pge_handler(ha_pt_decoder_t decoder) {
     return true;
 }
 
+__attribute__((always_inline))
 static inline bool tip_pgd_handler(ha_pt_decoder_t decoder) {
     get_ip_val(&decoder->i_pt_buffer, &decoder->last_tip);
     LOGGER("PGD    \t%p (TNT: %llu)\n", (void *)decoder->last_tip, ha_pt_decoder_cache_tnt_count(&decoder->cache));
     return true;
 }
 
+__attribute__((always_inline))
 static inline bool tip_fup_handler(ha_pt_decoder_t decoder) {
 //    uint64_t last = decoder->last_tip;
     uint64_t res = get_ip_val(&decoder->i_pt_buffer, &decoder->last_tip);
 
-    LOGGER("FUP    \t%p (TNT: %llu)\n", (void *)decoder->last_tip, ha_pt_decoder_cache_tnt_count(&decoder->cache));
     //FIXME: ...do FUPs not matter? Enabling them actually CAUSES issues
+    //We need to take an FUP when we have an overflow
+    if (unlikely(decoder->is_in_ovf_state)) {
+        LOGGER("FUP_OVF\t%p (TNT: %llu)\n", (void *)decoder->last_tip, ha_pt_decoder_cache_tnt_count
+        (&decoder->cache));
+        decoder->cache.override_target = res;
+        return false;
+    }
+
+    LOGGER("FUP    \t%p (TNT: %llu)\n", (void *)decoder->last_tip, ha_pt_decoder_cache_tnt_count(&decoder->cache));
     return true;
-//    //We do not emit an FUP if the last override was the same address.
-//    //FIXME: This is likely not correct, it's just a way to block the PGE and then a random useless duplication FUP
-//    if (likely(res != last)) {
-//        decoder->cache.override_target = res & ~decoder->in_psb; //in_psb is a full register mask. Ignore FUPs in PSBs.
-//        return decoder->in_psb;
-//    } else {
-//        //Block it.
-//        return true;
-//    }
+}
+
+__attribute__((always_inline))
+static inline bool ovf_handler(ha_pt_decoder_t decoder) {
+    LOGGER("OVF    \t@%p\n", (void *)(decoder->i_pt_buffer - decoder->pt_buffer));
+    decoder->is_in_ovf_state = 1;
+    return true;
 }
 
 static inline uint8_t asm_bsr(uint64_t x){
@@ -669,13 +681,11 @@ int ha_pt_decoder_decode_until_caches_filled(ha_pt_decoder_t decoder) {
         case __extension__ 0b00100011:    /* PSBEND */
             decoder->i_pt_buffer += PT_PKT_PSBEND_LEN;
             LOGGER("PSBEND\n");
-            decoder->in_psb = 0;
             DISPATCH_L1();
 
         case __extension__ 0b10000010:    /* PSB */
             decoder->i_pt_buffer += PT_PKT_PSB_LEN;
             LOGGER("PSB\n");
-            decoder->in_psb = -1; /* all ones so it can be used as a mask */
             DISPATCH_L1();
 
         case __extension__ 0b10100011:    /* LTNT */
@@ -688,8 +698,9 @@ int ha_pt_decoder_decode_until_caches_filled(ha_pt_decoder_t decoder) {
             DISPATCH_L1();
 
         case __extension__ 0b11110011:    /* OVF */
-            LOGGER("OVERFLOW\n");
-            return -HA_PT_UNSUPPORTED_TRACE_PACKET;
+            ovf_handler(decoder);
+            decoder->i_pt_buffer += PT_PKT_OVF_LEN;
+            DISPATCH_L1();
 
         case __extension__ 0b01000011:    /* PIP -- ignoring because we don't care about kernel */
         case __extension__ 0b10000011:    /* TS  -- ignoring because I have no idea what this is */

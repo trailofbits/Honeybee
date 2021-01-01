@@ -111,9 +111,17 @@ tests = [
 		Trace("decompress_clion", TESTS_ROOT + "tar/decompress_clion.pt", "0x55555555d000", "0x9000"),
 		Trace("help_page", TESTS_ROOT + "tar/help_page.pt", "0x55555555d000", "0x9000")
 	]),
-	Test("ssh", TESTS_ROOT + "ssh/ssh", [
-		Trace("interactive_login_attempt", TESTS_ROOT + "ssh/interactive_login_attempt.pt", "0x55555555e000", "0xa000"),
-	]),
+#	Test("ssh", TESTS_ROOT + "ssh/ssh", [
+#		Trace("interactive_login_attempt", TESTS_ROOT + "ssh/interactive_login_attempt.pt", "0x55555555e000", "0xa000"),
+#	]),
+#	Test("clang", TESTS_ROOT + "clang/clang", [
+#		Trace("compile_simple_c_part_1", TESTS_ROOT + "clang/compile_simple_c_1.pt", "0x400000", "0x0"),
+#		Trace("compile_simple_c_part_2", TESTS_ROOT + "clang/compile_simple_c_2.pt", "0x400000", "0x0"),
+#	]),
+#	Test("honey_mirror_1", TESTS_ROOT + "honey_mirror_1/honey_mirror", [
+#		Trace("clang_huge", TESTS_ROOT + "honey_mirror_1/clang_huge.pt", "0x401000", "0x1000"),
+#		Trace("bash", TESTS_ROOT + "honey_mirror_1/bash.pt", "0x401000", "0x1000"),
+#	]),
 ]
 
 
