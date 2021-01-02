@@ -184,7 +184,6 @@ ha_pt_decoder_t ha_pt_decoder_alloc(const char *trace_path) {
 
     //Write the stop codon
     map_handle[sb.st_size] = PT_TRACE_END;
-
     success = true;
 
     CLEANUP:
@@ -221,15 +220,17 @@ void ha_pt_decoder_reset(ha_pt_decoder_t decoder) {
     bzero(&decoder->cache, sizeof(ha_pt_decoder_cache));
 }
 
+
 int ha_pt_decoder_sync_forward(ha_pt_decoder_t decoder) {
-    decoder->i_pt_buffer = memmem(decoder->i_pt_buffer,
-                                  decoder->pt_buffer + decoder->pt_buffer_length - decoder->i_pt_buffer,
-                                  psb, PT_PKT_PSB_LEN);
-    if (!decoder->i_pt_buffer) {
-        return -HA_PT_DECODER_COULD_NOT_SYNC;
+    uint8_t *pt_end_ptr = decoder->pt_buffer + decoder->pt_buffer_length - 1;
+    for (uint8_t *ptr_i = decoder->i_pt_buffer; ptr_i < pt_end_ptr - PT_PKT_PSB_LEN; ptr_i++) {
+        if (memcmp(ptr_i, psb, PT_PKT_PSB_LEN) == 0) {
+            decoder->i_pt_buffer = ptr_i;
+            return -HA_PT_DECODER_NO_ERROR;
+        }
     }
 
-    return HA_PT_DECODER_NO_ERROR;
+    return -HA_PT_DECODER_COULD_NOT_SYNC;
 }
 
 void ha_pt_decoder_internal_get_trace_buffer(ha_pt_decoder_t decoder, uint8_t **trace, uint64_t *trace_length) {
@@ -607,7 +608,6 @@ int ha_pt_decoder_decode_until_caches_filled(ha_pt_decoder_t decoder) {
     };
 
 #define DISPATCH_L1 goto *dispatch_table_level_1[decoder->i_pt_buffer[0]];
-
     DISPATCH_L1;
     handle_pt_mode:
         decoder->i_pt_buffer += PT_PKT_MODE_LEN;

@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.17)
+cmake_minimum_required(VERSION 3.13)
 set(CMAKE_C_STANDARD 99)
 
 project(honey_mirror C)
@@ -31,11 +31,7 @@ target_compile_options(honey_analyzer PRIVATE -masm=intel)
 #target_compile_options(honey_analyzer PRIVATE -ftime-report)
 target_compile_options(honey_analyzer PRIVATE -Ofast)
 target_compile_options(honey_analyzer PRIVATE -g0)
+#target_compile_options(honey_analyzer PRIVATE -fno-omit-frame-pointer -fsanitize=address)
+#target_link_options(honey_analyzer PRIVATE -fno-omit-frame-pointer -fsanitize=address)
 target_include_directories(honey_analyzer PRIVATE ${CMAKE_SOURCE_DIR}/dependencies/libipt/libipt/include)
 target_link_libraries(honey_analyzer ${CMAKE_SOURCE_DIR}/dependencies/libipt/lib/libipt.a)
-
-
-#if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-#    target_compile_options(honey_mirror PRIVATE -fno-omit-frame-pointer -fsanitize=address)
-#    target_link_options(honey_mirror PRIVATE -fno-omit-frame-pointer -fsanitize=address)
-#endif()
