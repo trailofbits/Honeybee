@@ -86,8 +86,7 @@ int hm_code_generator_generate(const hm_disassembly_block *sorted_blocks, int64_
             //Invalid IPs that are out of range redirect to the invalid address handler
             "\t_ha_mirror_block_decode_JUMP_VIRTUAL:\n"
             "\t\t//The register we want to jump to is in r11, use the direct map to get to the segment\n"
-            "\t\tmov rsi, r11\n"
-            "\t\tsub rsi, %llu //Shift our VIP to the index of our table\n"
+            "\t\tlea rsi, [r11 - %llu] //Shift our VIP to the index of our table\n"
             "\t\tcmp rsi, %llu //Check if our index is in bounds. We use an unsigned compare to catch negatives.\n"
             "\t\tjae _ha_mirror_block_decode_INVALID_ADDRESS\n"
             "\t\tlea rdi, [_ha_mirror_direct_map + rip]\n"

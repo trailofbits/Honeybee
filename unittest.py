@@ -111,6 +111,10 @@ tests = [
 		Trace("decompress_clion", TESTS_ROOT + "tar/decompress_clion.pt", "0x55555555d000", "0x9000"),
 		Trace("help_page", TESTS_ROOT + "tar/help_page.pt", "0x55555555d000", "0x9000")
 	]),
+	Test("html_fast_parse", TESTS_ROOT + "html_fast_parse/fuzz_target", [
+		Trace("6.txt", TESTS_ROOT + "html_fast_parse/6_txt.pt", "0x555555558000", "0x4000"),
+	]),
+
 #	Test("ssh", TESTS_ROOT + "ssh/ssh", [
 #		Trace("interactive_login_attempt", TESTS_ROOT + "ssh/interactive_login_attempt.pt", "0x55555555e000", "0xa000"),
 #	]),

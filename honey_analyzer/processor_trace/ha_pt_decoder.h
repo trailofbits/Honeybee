@@ -59,6 +59,31 @@ typedef struct {
     int8_t tnt_cache[HA_PT_DECODER_CACHE_TNT_COUNT];
 } ha_pt_decoder_cache;
 
+typedef struct internal_ha_pt_decoder {
+    /**
+     * The PT buffer. This needs to be mmaped into a larger map in which the stop codon is placed just after the last
+     * byte of this buffer
+     */
+    uint8_t *pt_buffer;
+
+    /** This size of the PT buffer. This does not include the stop codon. */
+    uint64_t pt_buffer_length;
+
+    /** The iterator pointer. This is used to "walk" the trace without destroying our handle. */
+    uint8_t *i_pt_buffer;
+
+    /** The last TIP. This is used for understanding future TIPs since they are masks on this value. */
+    uint64_t last_tip;
+
+    /** Do we have an unresolved OVF packet? */
+    uint64_t is_in_ovf_state;
+
+    /* KEEP THIS LAST FOR THE SAKE OF THE CACHE */
+    /** The cache struct. This is exposed directly to clients. */
+    ha_pt_decoder_cache cache;
+
+} ha_pt_decoder;
+
 /**
  * Creates a new decoder from a raw Intel Processor Trace dump
  * @param trace_path The path to the trace file
@@ -131,7 +156,7 @@ static inline uint64_t ha_pt_decoder_cache_tnt_count(ha_pt_decoder_cache *cache)
  */
  __attribute__((always_inline))
 static inline int ha_pt_decoder_cache_query_tnt(ha_pt_decoder_t decoder, uint64_t *override) {
-    ha_pt_decoder_cache *cache = ha_pt_decoder_get_cache_ptr(decoder);
+    ha_pt_decoder_cache *cache = &decoder->cache;
     if (unlikely(ha_pt_decoder_cache_tnt_is_empty(cache))) {
         int refill_result = ha_pt_decoder_decode_until_caches_filled(decoder);
         if (unlikely(refill_result < 0 && refill_result != -HA_PT_DECODER_END_OF_STREAM)) {
@@ -161,7 +186,7 @@ static inline int ha_pt_decoder_cache_query_tnt(ha_pt_decoder_t decoder, uint64_
  */
 __attribute__((always_inline))
 static inline int ha_pt_decoder_cache_query_indirect(ha_pt_decoder_t decoder, uint64_t *ip) {
-    ha_pt_decoder_cache *cache = ha_pt_decoder_get_cache_ptr(decoder);
+    ha_pt_decoder_cache *cache = &decoder->cache;
     REROUTE:
     if (cache->override_target) {
         *ip = cache->override_target;

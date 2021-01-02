@@ -70,6 +70,7 @@ void ha_session_free(ha_session_t session) {
     free(session);
 }
 
+__attribute__((hot))
 int ha_session_take_indirect_branch(ha_session_t session, uint64_t *override_ip) {
     int result = ha_pt_decoder_cache_query_indirect(session->decoder, override_ip);
     if (result < 0) {
@@ -89,6 +90,7 @@ int ha_session_take_indirect_branch(ha_session_t session, uint64_t *override_ip)
     return 0;
 }
 
+__attribute__((hot))
 int ha_session_take_conditional(ha_session_t session, uint64_t *override_ip) {
     int taken = ha_pt_decoder_cache_query_tnt(session->decoder, override_ip);
     if (taken == 2) {

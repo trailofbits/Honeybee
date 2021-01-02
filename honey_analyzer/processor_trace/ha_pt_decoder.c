@@ -138,31 +138,6 @@ static uint8_t psb[16] = {
         0x02, 0x82, 0x02, 0x82, 0x02, 0x82, 0x02, 0x82
 };
 
-typedef struct internal_ha_pt_decoder {
-    /**
-     * The PT buffer. This needs to be mmaped into a larger map in which the stop codon is placed just after the last
-     * byte of this buffer
-     */
-    uint8_t *pt_buffer;
-
-    /** This size of the PT buffer. This does not include the stop codon. */
-    uint64_t pt_buffer_length;
-
-    /** The iterator pointer. This is used to "walk" the trace without destroying our handle. */
-    uint8_t *i_pt_buffer;
-
-    /** The last TIP. This is used for understanding future TIPs since they are masks on this value. */
-    uint64_t last_tip;
-
-    /** Do we have an unresolved OVF packet? */
-    uint64_t is_in_ovf_state;
-
-    /* KEEP THIS LAST FOR THE SAKE OF THE CACHE */
-    /** The cache struct. This is exposed directly to clients. */
-    ha_pt_decoder_cache cache;
-
-} ha_pt_decoder;
-
 #define TAG "[" __FILE__"] "
 
 ha_pt_decoder_t ha_pt_decoder_alloc(const char *trace_path) {
@@ -244,10 +219,6 @@ void ha_pt_decoder_reset(ha_pt_decoder_t decoder) {
     decoder->last_tip = 0;
     decoder->is_in_ovf_state = 0;
     bzero(&decoder->cache, sizeof(ha_pt_decoder_cache));
-}
-
-ha_pt_decoder_cache *ha_pt_decoder_get_cache_ptr(ha_pt_decoder_t decoder) {
-    return &decoder->cache;
 }
 
 int ha_pt_decoder_sync_forward(ha_pt_decoder_t decoder) {
@@ -374,6 +345,7 @@ static inline bool append_tnt_cache_ltnt(ha_pt_decoder_t decoder, uint64_t data)
 }
 
 
+__attribute__((hot))
 int ha_pt_decoder_decode_until_caches_filled(ha_pt_decoder_t decoder) {
     static void* dispatch_table_level_1[] = {
             __extension__ &&handle_pt_pad,        // 00000000
@@ -634,36 +606,36 @@ int ha_pt_decoder_decode_until_caches_filled(ha_pt_decoder_t decoder) {
             __extension__ &&handle_pt_error,        // 11111111
     };
 
-#define DISPATCH_L1() goto *dispatch_table_level_1[decoder->i_pt_buffer[0]]
+#define DISPATCH_L1 goto *dispatch_table_level_1[decoder->i_pt_buffer[0]];
 
-    DISPATCH_L1();
+    DISPATCH_L1;
     handle_pt_mode:
         decoder->i_pt_buffer += PT_PKT_MODE_LEN;
         LOGGER("MODE\n");
-        DISPATCH_L1();
+        DISPATCH_L1;
     handle_pt_tip:
         if (unlikely(!tip_handler(decoder))) {
             return HA_PT_DECODER_NO_ERROR;
         }
-        DISPATCH_L1();
+        DISPATCH_L1;
     handle_pt_tip_pge:
         if (unlikely(!tip_pge_handler(decoder))) {
             return HA_PT_DECODER_NO_ERROR;
         }
-        DISPATCH_L1();
+        DISPATCH_L1;
     handle_pt_tip_pgd:
         if (unlikely(!tip_pgd_handler(decoder))) {
             return HA_PT_DECODER_NO_ERROR;
         }
-        DISPATCH_L1();
+        DISPATCH_L1;
     handle_pt_tip_fup:
         if (unlikely(!tip_fup_handler(decoder))) {
             return HA_PT_DECODER_NO_ERROR;
         }
-        DISPATCH_L1();
+        DISPATCH_L1;
     handle_pt_pad:
         while(unlikely(!(*(++decoder->i_pt_buffer)))){}
-        DISPATCH_L1();
+        DISPATCH_L1;
     handle_pt_tnt8:
         LOGGER("TNT 0x%x\n", *decoder->i_pt_buffer);
         bool cont = append_tnt_cache(decoder, (uint64_t)(*(decoder->i_pt_buffer)));
@@ -671,22 +643,22 @@ int ha_pt_decoder_decode_until_caches_filled(ha_pt_decoder_t decoder) {
         if (unlikely(!cont)) {
             return HA_PT_DECODER_NO_ERROR;
         }
-        DISPATCH_L1();
+        DISPATCH_L1;
     handle_pt_level_2:
     switch(decoder->i_pt_buffer[1]){
         case __extension__ 0b00000011:    /* CBR */
             decoder->i_pt_buffer += PT_PKT_CBR_LEN;
-            DISPATCH_L1();
+            DISPATCH_L1;
 
         case __extension__ 0b00100011:    /* PSBEND */
             decoder->i_pt_buffer += PT_PKT_PSBEND_LEN;
             LOGGER("PSBEND\n");
-            DISPATCH_L1();
+            DISPATCH_L1;
 
         case __extension__ 0b10000010:    /* PSB */
             decoder->i_pt_buffer += PT_PKT_PSB_LEN;
             LOGGER("PSB\n");
-            DISPATCH_L1();
+            DISPATCH_L1;
 
         case __extension__ 0b10100011:    /* LTNT */
             LOGGER("LTNT\n");
@@ -695,12 +667,12 @@ int ha_pt_decoder_decode_until_caches_filled(ha_pt_decoder_t decoder) {
             if (unlikely(!cont)) {
                 return HA_PT_DECODER_NO_ERROR;
             }
-            DISPATCH_L1();
+            DISPATCH_L1;
 
         case __extension__ 0b11110011:    /* OVF */
             ovf_handler(decoder);
             decoder->i_pt_buffer += PT_PKT_OVF_LEN;
-            DISPATCH_L1();
+            DISPATCH_L1;
 
         case __extension__ 0b01000011:    /* PIP -- ignoring because we don't care about kernel */
         case __extension__ 0b10000011:    /* TS  -- ignoring because I have no idea what this is */
