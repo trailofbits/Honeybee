@@ -149,7 +149,7 @@ static inline uint64_t ha_pt_decoder_cache_tnt_count(ha_pt_decoder_cache *cache)
 
 /**
  * Query the decoder for the next TNT. This function will trigger additional analysis if necessary.
- * @param fup_override If there was an FUP which must be taken instead of the expected TNT, fup_override will hold
+ * @param override If there was an FUP which must be taken instead of the expected TNT, fup_override will hold
  * the virtual address to continue decoding at.
  * @return 0 if the branch was not taken. 1 if the branch was taken. 2 if there was an FUP. A return value less than
  * zero indicates an error.

@@ -5,7 +5,7 @@
 #ifndef HONEY_ANALYZER_HA_SESSION_AUDIT_H
 #define HONEY_ANALYZER_HA_SESSION_AUDIT_H
 
-#include "../trace_analysis/ha_session.h"
+#include "../../honey_analyzer/trace_analysis/ha_session.h"
 
 enum ha_session_audit_status {
     /** The audit passed. libipt and Honeybee produced essentially identical outputs. */

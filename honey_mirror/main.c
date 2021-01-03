@@ -15,9 +15,9 @@ int main(int argc, const char * argv[]) {
                 "        .         .         . -{{_(|8)\n"
                 "jgs       ' .  . ' ' .  . '     (__/\n\n"
                 "honey_mirror converts an ELF binary to a 'mirror' which may be used by Honeybee to accelerate Intel "
-                "Processor Trace decoding.\n\n"
+                "Processor Trace decoding inside another program.\n\n"
                 "Usage:\n"
-                "honey_mirror <input binary> <output binary location> <honeybee build directory>\n"
+                "honey_mirror <input binary> <output shared library location> <honeybee build directory>\n"
                 );
         return 1;
     }
@@ -68,7 +68,13 @@ int main(int argc, const char * argv[]) {
     }
 
     char source_path[PATH_MAX];
-    snprintf(source_path, sizeof(source_path), "%s/cmake-build-debug/honey_analyzer", honeybee_build_path);
+    const char *source_path_sprintf;
+#if __APPLE__
+    source_path_sprintf = "%s/cmake-build-debug/libhoney_analyzer.dylib";
+#else
+    source_path_sprintf = "%s/cmake-build-debug/libhoney_analyzer.so";
+#endif
+    snprintf(source_path, sizeof(source_path), source_path_sprintf, honeybee_build_path);
 
     if ((result = rename(source_path, output_binary_path))) {
         result = 6;

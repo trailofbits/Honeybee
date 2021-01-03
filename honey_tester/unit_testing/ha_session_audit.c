@@ -12,9 +12,9 @@
 #include "intel-pt.h"
 
 #include "ha_session_audit.h"
-#include "../trace_analysis/ha_session_internal.h"
-#include "../trace_analysis/ha_mirror_utils.h"
-#include "../ha_debug_switch.h"
+#include "../../honey_analyzer/trace_analysis/ha_session_internal.h"
+#include "../../honey_analyzer/trace_analysis/ha_mirror_utils.h"
+#include "../../honey_analyzer/ha_debug_switch.h"
 
 #define TAG "[" __FILE__ "] "
 

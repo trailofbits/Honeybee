@@ -8,9 +8,9 @@
 #include <stdint.h>
 #include <time.h>
 
-#include "processor_trace/ha_pt_decoder.h"
+#include "../honey_analyzer/processor_trace/ha_pt_decoder.h"
 
-#include "trace_analysis/ha_session.h"
+#include "../honey_analyzer/trace_analysis/ha_session.h"
 #include "unit_testing/ha_session_audit.h"
 
 #define TAG "[" __FILE__"] "
