@@ -10,24 +10,25 @@ Date: December 31st, 2020
 import subprocess
 
 TESTS_ROOT = "../honeybee_unittest_data/"
-HONEY_MIRROR_PATH = "cmake-build-debug/honey_mirror"
-ANALYZE_TEMP_PATH = "/tmp/analyze"
+HONEY_HIVE_GENERATOR_PATH = "cmake-build-debug/honey_hive_generator"
+HONEY_TESTER_PATH = "cmake-build-debug/honey_tester"
+HIVE_TEMP_PATH = "/tmp/test_hive.hive"
 
 class Test:
-	__slots__ = ["display_name", "binary_path", "traces", "build_exit_code"]
+	__slots__ = ["display_name", "binary_path", "traces", "hive_exit_code"]
 	def __init__(self, display_name, binary_path, traces):
 		self.display_name = display_name
 		self.binary_path = binary_path
 		self.traces = traces
 		
-		self.build_exit_code = -1
+		self.hive_exit_code = -1
 	
 	def print_test_result_and_return_summary(self):
 		"""
 		Prints the results of this test and all of its traces
 		"""
-		overall_success = self.build_exit_code == 0
-		print(f"[[{self.display_name}]]\n* Target build code = {str(self.build_exit_code)}")
+		overall_success = self.hive_exit_code == 0
+		print(f"[[{self.display_name}]]\n* Hive generator exit code = {str(self.hive_exit_code)}")
 		
 		for trace in self.traces:
 			description, success = trace.get_result_description_and_success()
@@ -60,28 +61,28 @@ class Trace:
 		return description, success
 		
 
-def build_test_analyze_target(test):
+def generate_test_hive(test):
 	"""
-	Compiles the analyze target for a given test. 
+	Generates the hive for the test target. 
 	Returns true on success.
 	"""
-	print(f"[***] Running build on {test.display_name}")
-	task = subprocess.Popen([HONEY_MIRROR_PATH, test.binary_path, ANALYZE_TEMP_PATH, "."])
+	print(f"[***] Running hive generator on {test.display_name}")
+	task = subprocess.Popen([HONEY_HIVE_GENERATOR_PATH, test.binary_path, HIVE_TEMP_PATH])
 	task.communicate() #wait
-	test.build_exit_code = task.returncode
+	test.hive_exit_code = task.returncode
 	if task.returncode != 0:
-		print("Build {test.display_name} failed with code {str(task.returncode)}")
+		print(f"Hive generator for {test.display_name} failed with code {str(task.returncode)}")
 		return False
 	return True
 	
 def perform_libipt_audit(test, trace):
 	"""
-	Performs a libipt audit to verify that the decoder and mirror are working correctly.
+	Performs a libipt audit to verify that the decoder and hive are working correctly.
 	Requires that the analyze target has been built.
 	Returns true on success.
 	"""
 	print(f"[***] Running libipt audit on {test.display_name}.{trace.display_name}")
-	task = subprocess.Popen([ANALYZE_TEMP_PATH, "-a", "-s", trace.sideband_load_address, "-o", trace.sideband_offset, "-t", trace.trace_path, "-b", test.binary_path])
+	task = subprocess.Popen([HONEY_TESTER_PATH, "-a", "-h", HIVE_TEMP_PATH, "-s", trace.sideband_load_address, "-o", trace.sideband_offset, "-t", trace.trace_path, "-b", test.binary_path])
 	task.communicate() #wait
 	trace.libipt_audit_exit_code = task.returncode
 	if task.returncode != 0:
@@ -115,6 +116,7 @@ tests = [
 		Trace("6.txt", TESTS_ROOT + "html_fast_parse/6_txt.pt", "0x555555558000", "0x4000"),
 	]),
 
+# These tests not used due to slight differences in when an OVF packet is handled. This does not effect decoding in a serious way since Intel's Software Developer Manual is very vague about what should be done about OVFs since so much can be lost during an internal overflow.
 #	Test("ssh", TESTS_ROOT + "ssh/ssh", [
 #		Trace("interactive_login_attempt", TESTS_ROOT + "ssh/interactive_login_attempt.pt", "0x55555555e000", "0xa000"),
 #	]),
@@ -131,8 +133,8 @@ tests = [
 
 for test in tests:
 	#Try and build the target
-	if not build_test_analyze_target(test):
-		print(f"[!!!] Skipping all traces for test {test.display_name} because it failed to build")
+	if not generate_test_hive(test):
+		print(f"[!!!] Skipping all traces for test {test.display_name} because it failed to generate a hive")
 		continue
 		
 	for trace in test.traces:

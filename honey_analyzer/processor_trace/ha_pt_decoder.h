@@ -28,8 +28,6 @@ typedef enum {
     HA_PT_DECODER_TRACE_DESYNC = 4,
     /** An unsupported packet was found in the PT stream. */
     HA_PT_UNSUPPORTED_TRACE_PACKET = 5,
-    /** This is used by the mirror to communicate invalid jump targets. */
-    HA_PT_INVALID_ADDRESS = 6,
 } ha_pt_decoder_status;
 
 /** The number of elements our cache struct holds. This is a power of two so we can mask instead of modulo */

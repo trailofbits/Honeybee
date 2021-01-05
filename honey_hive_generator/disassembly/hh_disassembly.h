@@ -2,8 +2,8 @@
 // Created by Allison Husain on 12/21/20.
 //
 
-#ifndef HONEY_MIRROR_HM_DISASSEMBLY_H
-#define HONEY_MIRROR_HM_DISASSEMBLY_H
+#ifndef HONEY_MIRROR_HH_DISASSEMBLY_H
+#define HONEY_MIRROR_HH_DISASSEMBLY_H
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -17,7 +17,7 @@ typedef struct {
     uint32_t length;
     uint16_t last_instruction_size;
     uint16_t instruction_category;
-} hm_disassembly_block;
+} hh_disassembly_block;
 
 /**
  * Iterates the basic blocks inside of an ELF binary
@@ -26,7 +26,7 @@ typedef struct {
  * @param blocks_count The location to place the number of blocks in the blocks buffer
  * @return true on success
  */
-bool hm_disassembly_get_blocks_from_elf(const char *path, hm_disassembly_block **blocks, int64_t *blocks_count);
+bool hh_disassembly_get_blocks_from_elf(const char *path, hh_disassembly_block **blocks, int64_t *blocks_count);
 
 
-#endif //HONEY_MIRROR_HM_DISASSEMBLY_H
+#endif //HONEY_MIRROR_HH_DISASSEMBLY_H

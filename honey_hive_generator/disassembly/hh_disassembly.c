@@ -16,7 +16,7 @@
 
 #include "xed-interface.h"
 
-#include "hm_disassembly.h"
+#include "hh_disassembly.h"
 #include "elf.h"
 
 #define TAG "[" __FILE__ "] "
@@ -53,10 +53,10 @@ bool is_qualifying_cofi(xed_category_enum_t category) {
 }
 
 
-bool hm_disassembly_get_blocks_from_elf(const char *path, hm_disassembly_block **blocks, int64_t *blocks_count) {
+bool hh_disassembly_get_blocks_from_elf(const char *path, hh_disassembly_block **blocks, int64_t *blocks_count) {
     int fd = 0;
     void *map_handle = NULL;
-    hm_disassembly_block *_blocks = NULL;
+    hh_disassembly_block *_blocks = NULL;
     bool success = false;
 
     fd = open(path, O_RDONLY);
@@ -115,7 +115,7 @@ bool hm_disassembly_get_blocks_from_elf(const char *path, hm_disassembly_block *
 
     size_t blocks_capacity = 16;
     int64_t blocks_write_index = 0;
-    _blocks = malloc(sizeof(hm_disassembly_block) * blocks_capacity);
+    _blocks = malloc(sizeof(hh_disassembly_block) * blocks_capacity);
     if (!_blocks) {
         printf(TAG "Out of memory!\n");
         success = false;
@@ -173,7 +173,7 @@ bool hm_disassembly_get_blocks_from_elf(const char *path, hm_disassembly_block *
 
                 if (blocks_write_index >= blocks_capacity) {
                     blocks_capacity *= 2;
-                    hm_disassembly_block *new_blocks = realloc(_blocks, sizeof(hm_disassembly_block) * blocks_capacity);
+                    hh_disassembly_block *new_blocks = realloc(_blocks, sizeof(hh_disassembly_block) * blocks_capacity);
                     if (!new_blocks) {
                         printf(TAG "Out of memory!\n");
                         success = false;
@@ -183,7 +183,7 @@ bool hm_disassembly_get_blocks_from_elf(const char *path, hm_disassembly_block *
                     _blocks = new_blocks;
                 }
 
-                hm_disassembly_block *block = &_blocks[blocks_write_index++];
+                hh_disassembly_block *block = &_blocks[blocks_write_index++];
                 block->instruction_category = category;
                 block->start_offset = block_start;
                 block->length = (uint32_t) (insn_va - block_start);

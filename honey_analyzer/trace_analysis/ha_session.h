@@ -12,11 +12,12 @@ typedef struct internal_ha_session * ha_session_t;
 /**
  * Create a new trace session
  * @param session_out The location to place a pointer to the created session. On error, left unchanged.
+ * @param hive_path The path to the Honeybee hive to use for decoding this trace.
  * @param trace_path The path to the raw PT trace
- * @param binary_slide The ASLR slide of the binary
+ * @param trace_slide The ASLR shifted base address of the binary for this trace
  * @return Error code. On success, zero is returned
  */
-int ha_session_alloc(ha_session_t *session_out, const char *trace_path, uint64_t binary_slide);
+int ha_session_alloc(ha_session_t *session_out, const char *hive_path, const char *trace_path, uint64_t trace_slide);
 
 /**
  * Frees a session and all of its owned components
@@ -35,32 +36,6 @@ int ha_session_generate_coverage(ha_session_t session);
  * @return Error code. On success, zero is returned
  */
 int ha_session_print_trace(ha_session_t session);
-
-/* functions meant for ha_mirrors */
-
-/**
- * Queries the session for the destination of the next indirect branch
- * @param session The session from which this request originates
- * @param override_ip The location to place the new un-slid virtual IP. NOTE: this may be a completely different
- * location if an event was processed which changed the IP.
- * @param override_code_location  The location to place the new __TEXT location for the next decoder block
- * @return A libipt error code. On error, override_ip and override_code_location are undefined
- */
-int ha_session_take_indirect_branch(ha_session_t session, uint64_t *override_ip)
-    asm("_ha_session_take_indirect_branch");
-
-/**
- * Queries the session for the direction of the next conditional branch
- * @param session The session from which this request originates
- * @param override_ip The location to place the new virtual IP if an event was processed which redirects execution.
- * If no event changes the IP, this value is left unchanged.
- * @param override_code_location  The location to place the new __TEXT location for the next decoder block if an event
- * was processed which redirects execution. If no event changes the IP, this value is left unchanged.
- * @return A negative value indicates a libipt error. A value of 0 indicates the branch was not taken. A value of 1
- * indicates that the branch was taken. A value of 0x3 indicates an override update.
- */
-int ha_session_take_conditional(ha_session_t session, uint64_t *override_ip)
-    asm("_ha_session_take_conditional");
 
 
 #endif //HONEY_ANALYSIS_HA_SESSION_H

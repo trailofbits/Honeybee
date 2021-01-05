@@ -6,12 +6,16 @@
 
 #include "ha_session.h"
 #include "ha_session_internal.h"
-#include "ha_mirror_utils.h"
 #include "../ha_debug_switch.h"
 
 #define TAG "[" __FILE__ "] "
 
-int ha_session_alloc(ha_session_t *session_out, const char *trace_path, uint64_t binary_slide) {
+/**
+ * Get the lower 32 bytes
+ */
+#define LO32(x) ((uint32_t)(x))
+
+int ha_session_alloc(ha_session_t *session_out, const char *hive_path, const char *trace_path, uint64_t trace_slide) {
     int result = 0;
 
     if (!(session_out && trace_path)) {
@@ -26,7 +30,12 @@ int ha_session_alloc(ha_session_t *session_out, const char *trace_path, uint64_t
         goto CLEANUP;
     }
 
-    session->binary_slide = binary_slide;
+    if (!(session->hive = hb_hive_alloc(hive_path))) {
+        result = -3;
+        goto CLEANUP;
+    }
+
+    session->trace_slide = trace_slide;
 
     session->decoder = ha_pt_decoder_alloc(trace_path);
     if (!session->decoder) {
@@ -67,53 +76,72 @@ void ha_session_free(ha_session_t session) {
         session->decoder = NULL;
     }
 
+    if (session->hive) {
+        hb_hive_free(session->hive);
+        session->hive = NULL;
+    }
+
     free(session);
 }
 
-__attribute__((hot))
-int ha_session_take_indirect_branch(ha_session_t session, uint64_t *override_ip) {
-    int result = ha_pt_decoder_cache_query_indirect(session->decoder, override_ip);
-    if (result < 0) {
-        return result;
-    }
+__attribute__ ((hot))
+int64_t ha_session_block_decode(ha_session_t session) {
+    uint64_t index;
+    uint64_t vip;
+    uint64_t *blocks = session->hive->blocks;
+    int64_t status;
 
-    *override_ip -= session->binary_slide;
+    //We need to take an indirect jump since we currently don't have a starting state
+    goto TRACE_INIT;
+    while (status >= 0) {
+        session->on_block_function(session, LO32(vip) + session->hive->uvip_slide);
+
+        /* if we inline both take_conditional and take_indirect and have them both pre-fetched, we can do a branchless increment on the value we consume */
+        vip = blocks[2 * LO32(index) + 1];
+        index = blocks[2 * LO32(index)];
+
+        if (index & HB_HIVE_FLAG_IS_CONDITIONAL) {
+            uint64_t result = ha_pt_decoder_cache_query_tnt(session->decoder, &vip);
+            if (result == 2 /* override */) {
+#if HA_ENABLE_ANALYSIS_LOGS
+                printf("\tTNT result = 2: override destination to %p\n", (void *)vip);
+#endif
+                vip -= session->trace_slide;
+                index = hb_hive_virtual_address_to_block_index(session->hive, vip);
+            } else if (result == 1 /* taken */) {
+                index >>= 1;
+#if HA_ENABLE_ANALYSIS_LOGS
+                printf("\tTNT result = 1: vip = %p\n", (void *)(uint64_t)(LO32(vip)) + session->hive->uvip_slide);
+#endif
+            } else if (result == 0 /* not taken */) {
+                index >>= 33;
+                vip >>= 32;
 
 #if HA_ENABLE_ANALYSIS_LOGS
-    if (result == 1) {
-        printf(TAG "\tasync event update, switching to %p\n", (void *)*override_ip);
-    } else {
-        printf(TAG "\tvv indirect from to %p\n", (void *)*override_ip);
-    }
+                printf("\tTNT result = 0: vip = %p\n", (void *)(uint64_t)(LO32(vip)) + session->hive->uvip_slide);
 #endif
+            }
+        } else {
+            /* taken or direct -- cuts off the conditional flag or the zero bit if NT */
+            index >>= 1;
+        }
 
-    return 0;
+        if (LO32(index) == HB_HIVE_FLAG_INDIRECT_JUMP_INDEX_VALUE) {
+            TRACE_INIT:
+            status = ha_pt_decoder_cache_query_indirect(session->decoder, &vip);
+            vip -= session->trace_slide;
+            index = hb_hive_virtual_address_to_block_index(session->hive, vip);
+            vip -= session->hive->uvip_slide;
+
+#if HA_ENABLE_ANALYSIS_LOGS
+            printf("\tIndirect: vip = %p\n", (void *)(uint64_t)(LO32(vip)));
+#endif
+        }
+    }
+
+    return status;
 }
 
-__attribute__((hot))
-int ha_session_take_conditional(ha_session_t session, uint64_t *override_ip) {
-    int taken = ha_pt_decoder_cache_query_tnt(session->decoder, override_ip);
-    if (taken == 2) {
-        //Override
-        *override_ip -= session->binary_slide;
-
-#if HA_ENABLE_ANALYSIS_LOGS
-        printf(TAG "\tasync event update, switching to %p\n", (void *)*override_ip);
-#endif
-
-        return 0x3;
-    }
-
-
-#if HA_ENABLE_ANALYSIS_LOGS
-    printf(TAG "\tvv taking conditional: %d\n", taken);
-    if (taken != 0 && taken != 1) {
-        abort();
-    }
-#endif
-
-    return taken;
-}
 
 //MARK: - Simple custom trace implementations
 
@@ -138,5 +166,5 @@ int ha_session_print_trace(ha_session_t session) {
 #if HA_ENABLE_BLOCK_LOGS
     printf(TAG "--BEGIN TRACE DECODE--\n");
 #endif
-    return ha_mirror_block_decode(session);
+    return ha_session_block_decode(session);
 }

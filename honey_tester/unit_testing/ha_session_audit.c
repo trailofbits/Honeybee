@@ -13,7 +13,6 @@
 
 #include "ha_session_audit.h"
 #include "../../honey_analyzer/trace_analysis/ha_session_internal.h"
-#include "../../honey_analyzer/trace_analysis/ha_mirror_utils.h"
 #include "../../honey_analyzer/ha_debug_switch.h"
 
 #define TAG "[" __FILE__ "] "
@@ -27,7 +26,7 @@ typedef struct {
     uint64_t honey_blocks_passed;
 } audit_extra;
 
-static void libipt_audit_on_block(ha_session_t session, uint64_t mirror_unslid_ip) {
+static void libipt_audit_on_block(ha_session_t session, uint64_t hive_unslid_ip) {
     audit_extra *extra = session->extra_context;
     if (extra->status) {
         //We don't actually have a way to abort a trace in progress, however we will refuse to continue the test so
@@ -61,16 +60,19 @@ static void libipt_audit_on_block(ha_session_t session, uint64_t mirror_unslid_i
         }
     }
 
-    uint64_t libipt_unslid = block.ip - session->binary_slide;
-    if (mirror_unslid_ip == libipt_unslid) {
+    uint64_t libipt_unslid = block.ip - session->trace_slide;
+    uint32_t libipt_i = hb_hive_virtual_address_to_block_index(session->hive, libipt_unslid);
+    uint32_t hive_i = hb_hive_virtual_address_to_block_index(session->hive, hive_unslid_ip);
+
+    if (hive_i == libipt_i && hive_i != -1) {
         //We store the last block IP to account for libipt's special handling of FUPs and its choice to split blocks
         extra->last_libipt_ip = libipt_unslid;
         extra->honey_blocks_passed++;
 #if HA_ENABLE_BLOCK_LEVEL_LOGS
-        printf(TAG "PASS! mirror = %p, libipt = %p.\n", (void *)mirror_unslid_ip, (void *)libipt_unslid);
+        printf(TAG "PASS! hive = %p, libipt = %p.\n", (void *)hive_unslid_ip, (void *)libipt_unslid);
 #endif
-    } else if (extra->last_libipt_ip && ha_mirror_utils_convert_unslid_to_offset(libipt_unslid)
-        == ha_mirror_utils_convert_unslid_to_offset(extra->last_libipt_ip)) {
+    } else if (extra->last_libipt_ip && libipt_i
+        == hb_hive_virtual_address_to_block_index(session->hive, extra->last_libipt_ip)) {
         //We have a split block
 #if HA_ENABLE_BLOCK_LEVEL_LOGS
         printf(TAG "\tDetected libipt splitting last block %p to %p due to an FUP. Trying again!\n",
@@ -80,8 +82,8 @@ static void libipt_audit_on_block(ha_session_t session, uint64_t mirror_unslid_i
         goto FUP_TRY_AGAIN;
     } else {
         printf(TAG "*** AUDIT FAILED ***\n");
-        printf(TAG "mirror = %p, libipt = %p [honey_blocks = %llu]\n",
-               (void *)mirror_unslid_ip, (void *)libipt_unslid, extra->honey_blocks_passed);
+        printf(TAG "hive = %p, libipt = %p [honey_blocks = %llu]\n",
+               (void *)hive_unslid_ip, (void *)libipt_unslid, extra->honey_blocks_passed);
         extra->status = -HA_SESSION_AUDIT_TEST_INCORRECT_RESULT;
 //        asm("ud2");
     }
@@ -142,7 +144,7 @@ int ha_session_audit_perform_libipt_audit(ha_session_t session, const char *bina
     }
 
     struct pt_image *image_unowned = pt_blk_get_image(block_decoder);
-    if ((result = pt_image_add_file(image_unowned, binary_path, 0x00, sb.st_size, NULL, session->binary_slide)) < 0
+    if ((result = pt_image_add_file(image_unowned, binary_path, 0x00, sb.st_size, NULL, session->trace_slide)) < 0
         || (result = pt_blk_sync_forward(block_decoder)) < 0) {
         result = -HA_SESSION_AUDIT_TEST_INIT_FAILED;
         goto CLEANUP;
@@ -155,7 +157,7 @@ int ha_session_audit_perform_libipt_audit(ha_session_t session, const char *bina
 
     //Kickoff mirror decoding from our side
     session->on_block_function = libipt_audit_on_block;
-    result = ha_mirror_block_decode(session);
+    result = ha_session_block_decode(session);
 
     //Figure out which result we want to end with. We want the EARLIEST error.
     if (extra->status != HA_SESSION_AUDIT_TEST_PASS) {

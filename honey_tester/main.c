@@ -29,11 +29,12 @@ int main(int argc, const char * argv[]) {
     enum execution_task task = EXECUTION_TASK_UNKNOWN;
     char *trace_path = NULL;
     char *binary_path = NULL;
+    char *hive_path = NULL;
     uint64_t slid_load_sideband_address = -1;
     uint64_t binary_offset_sideband = -1;
 
     int opt = 0;
-    while ((opt = getopt(argc, (char *const *) argv, "aps:o:t:b:")) != -1) {
+    while ((opt = getopt(argc, (char *const *) argv, "aph:s:o:t:b:")) != -1) {
         switch (opt) {
             case 'a':
                 task = EXECUTION_TASK_AUDIT;
@@ -41,6 +42,8 @@ int main(int argc, const char * argv[]) {
             case 'p':
                 task = EXECUTION_TASK_PERFORMANCE;
                 break;
+            case 'h':
+                hive_path = optarg;
             case 's':
                 slid_load_sideband_address = strtoull(optarg, &end_ptr, 16);
                 break;
@@ -65,6 +68,7 @@ int main(int argc, const char * argv[]) {
                         "Usage:\n"
                         "-a Run a correctness audit using libipt\n"
                         "-p Run a performance test\n"
+                        "-h The path to the Honeybee Hive to use to decode the trace\n"
                         "-s The slid binary address according to sideband\n"
                         "-o The binary offset according to sideband\n"
                         "-t The Processor Trace file to decode\n"
@@ -76,7 +80,7 @@ int main(int argc, const char * argv[]) {
 
     //Validate
     if (!trace_path || slid_load_sideband_address == -1 || binary_offset_sideband == -1
-        || task == EXECUTION_TASK_UNKNOWN) {
+        || task == EXECUTION_TASK_UNKNOWN || !hive_path) {
         printf(TAG "Required argument missing\n");
         goto SHOW_USAGE;
     }
@@ -91,7 +95,7 @@ int main(int argc, const char * argv[]) {
     int result = HA_PT_DECODER_NO_ERROR;
     ha_session_t session = NULL;
 
-    result = ha_session_alloc(&session, trace_path , slid_load_sideband_address - binary_offset_sideband);
+    result = ha_session_alloc(&session, hive_path, trace_path, slid_load_sideband_address - binary_offset_sideband);
     if (result) {
         printf(TAG "Failed to start session, error=%d\n", result);
         goto CLEANUP;
