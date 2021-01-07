@@ -10,6 +10,7 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <stdbool.h>
+#include <inttypes.h>
 
 #include "hb_hive.h"
 #define TAG "[" __FILE__ "] "
@@ -141,7 +142,8 @@ void hb_hive_free(hb_hive *hive) {
 void hb_hive_describe_block(hb_hive *hive, uint64_t i) {
     uint64_t index = hive->blocks[2 * i];
     uint64_t vip = hive->blocks[2 * i + 1];
-    printf("Block %llu:\n", i);
-    printf("Not-taken index = %llu, Taken index = %llu, Conditional=%llu\n", (index >> 33), (index >> 1) & ((1LLU << 31) - 1), index & 1);
-    printf("Not-taken VIP = %p, Taken VIP = %p\n", (void *)(vip >> 32), (void *)(vip & ((1LLU << 32) - 1)));
+    printf("Block %" PRIu64 ":\n", i);
+    printf("Not-taken index = %" PRIu64 ", Taken index = %" PRIu64 ", Conditional=%" PRIu64 "\n",
+           (index >> 33), (uint64_t) ((index >> 1) & ((1LLU << 31) - 1)), index & 1);
+    printf("Not-taken VIP = %p, Taken VIP = %p\n", (void *) (vip >> 32), (void *) (vip & ((1LLU << 32) - 1)));
 }
