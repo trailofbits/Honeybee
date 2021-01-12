@@ -268,29 +268,6 @@ static int allocate_pt_buffer_on_cpu(int cpu) {
                 break;
             }
 
-            {
-                /*
-                 * To aid in finding trace boundaries using the 16-bit wide packet byte field in the status MSR, we
-                 * write a canary every 2^16 bytes. A client can then walk in 2^16 byte strides to check for the last
-                 * surviving canary. The last surviving canary indicates that the 16-bit counter must have started
-                 * from where we expected to find the PREVIOUS canary.
-                 */
-                uint64_t fake_buffer_i = n * PAGE_SIZE << topa_page_order;
-                uint64_t i = 0;
-
-                //round up to nearest 2^16 if needed
-                if (fake_buffer_i % 1 << 16 != 0) {
-                    i = fake_buffer_i >> 16;
-                    i += 1;
-                    i <<= 16;
-                    i -= fake_buffer_i;
-                }
-
-                for (; i < (PAGE_SIZE << topa_page_order); i += (1 << 16)) {
-                    buf[i] = 0x55; //0x55 is never emitted by PT and so it's a valid canary
-                }
-            }
-
             topa[n] = __pa(buf) | (topa_page_order << TOPA_SIZE_SHIFT);
         }
 
@@ -410,8 +387,9 @@ static void configure_pt_on_this_cpu(void *arg) {
         }
     }
 
-    if (wrmsrl_safe(MSR_IA32_RTIT_STATUS, 0ULL)
-        || wrmsrl_safe(MSR_IA32_RTIT_CTL, ctl)) {
+    if (wrmsrl_safe(MSR_IA32_RTIT_STATUS, 0ULL) //clear errors
+        || wrmsrl_safe(MSR_IA32_RTIT_OUTPUT_MASK_PTRS, 0ULL) //reset our output pointers to the start
+        || wrmsrl_safe(MSR_IA32_RTIT_CTL, ctl)) { //write out the config :)
         goto EXIT;
     }
 
@@ -665,8 +643,10 @@ static long honey_driver_ioctl(struct file *file, unsigned int cmd, unsigned lon
 
         case HB_DRIVER_PACKET_IOC_GET_TRACE_LENGTHS: {
             hb_driver_packet_get_trace_lengths get_lengths;
-            uint64_t status_msr;
-            uint16_t packet_byte_count;
+            uint64_t mask_msr;
+            uint64_t buffer_index;
+            uint64_t buffer_offset;
+            uint64_t packet_byte_count;
             uint64_t buffer_size;
 
             printk(TAGI "ioctl -- get_trace_lengths\n");
@@ -683,11 +663,19 @@ static long honey_driver_ioctl(struct file *file, unsigned int cmd, unsigned lon
                 goto OUT;
             }
 
-            if ((result = read_msr_on_cpu(get_lengths.cpu_id, MSR_IA32_RTIT_STATUS, &status_msr)) < 0) {
+            if ((result = read_msr_on_cpu(get_lengths.cpu_id, MSR_IA32_RTIT_OUTPUT_MASK_PTRS, &mask_msr)) < 0) {
                 goto OUT;
             }
 
-            packet_byte_count = (status_msr >> 32) & ((1LLU << 16) - 1);
+            /*
+             * This is from the Intel docs. ToPA provides very specific information about the last write location in
+             * the output mask MSR. It's gross bit hacking but buffer_index tells us the index in our table (zero
+             * index) and buffer_offset tells us the byte inside that buffer.
+             */
+            buffer_index = (mask_msr >> 7) & ((1LLU << 25) - 1);
+            buffer_offset = (mask_msr >> 32) & ((1LLU << 32) - 1);
+            packet_byte_count = buffer_index * (PAGE_SIZE << topa_page_order) + buffer_offset;
+
             buffer_size = get_topa_entry_count(get_lengths.cpu_id) * (PAGE_SIZE << topa_page_order);
 
             if (copy_to_user(get_lengths.trace_packet_byte_count_out, &packet_byte_count, sizeof packet_byte_count)

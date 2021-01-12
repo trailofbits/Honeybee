@@ -104,14 +104,11 @@ typedef struct {
     uint16_t cpu_id;
 
     /**
-     * The number of valid bytes of trace data in the buffer. This can be used for processing the trace data.
-     * Note: this is a 16-bit value and so may not cover the entire length of the buffer. What you can do to find the
-     * true length is simply check `i*(1<<16) + trace_packet_byte_count` while the expression is in bounds and check
-     * for CBRs. This requires purging the buffers, however.
-     *
+     * The number of valid bytes of trace data in the buffer, offset from the start of the buffer. This can be used for
+     * processing the trace data.
      * The kernel will place values at this location on success.
      */
-    uint16_t *trace_packet_byte_count_out;
+    uint64_t *trace_packet_byte_count_out;
 
     /**
      * The true length of the allocated buffer. This can be used for mmap-ing the trace buffer.
