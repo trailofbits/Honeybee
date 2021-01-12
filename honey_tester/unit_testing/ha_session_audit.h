@@ -26,6 +26,7 @@ enum ha_session_audit_status {
  * @param binary_path The path to the binary used to create the mirror/this trace. This is used by libipt.
  * @return 0 on success, negative on error. Error codes come from enum ha_session_audit_status.
  */
-int ha_session_audit_perform_libipt_audit(ha_session_t session, const char *binary_path);
+int ha_session_audit_perform_libipt_audit(ha_session_t session, const char *binary_path,
+                                          uint8_t *trace_buffer, uint64_t trace_length);
 
 #endif //HONEY_ANALYZER_HA_SESSION_AUDIT_H

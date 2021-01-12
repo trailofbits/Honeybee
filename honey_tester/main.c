@@ -7,6 +7,11 @@
 #include <unistd.h>
 #include <stdint.h>
 #include <time.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <string.h>
+#include <inttypes.h>
 
 #include "../honey_analyzer/processor_trace/ha_pt_decoder.h"
 
@@ -15,7 +20,9 @@
 
 #define TAG "[" __FILE__"] "
 
-enum execution_task {EXECUTION_TASK_UNKNOWN, EXECUTION_TASK_AUDIT, EXECUTION_TASK_PERFORMANCE};
+enum execution_task {
+    EXECUTION_TASK_UNKNOWN, EXECUTION_TASK_AUDIT, EXECUTION_TASK_PERFORMANCE
+};
 
 long current_clock() {
     struct timespec tv;
@@ -70,7 +77,7 @@ int main(int argc, const char * argv[]) {
                         "-p Run a performance test\n"
                         "-h The path to the Honeybee Hive to use to decode the trace\n"
                         "-s The slid binary address according to sideband\n"
-                        "-o The binary offset according to sideband\n"
+                        "-o The executable segment offset according to sideband\n"
                         "-t The Processor Trace file to decode\n"
                         "-b The binary to decode with. This is only used in libipt based tests!\n"
                 );
@@ -94,17 +101,55 @@ int main(int argc, const char * argv[]) {
 
     int result = HA_PT_DECODER_NO_ERROR;
     ha_session_t session = NULL;
+    int fd = 0;
+    void *trace_map_handle = NULL;
+    uint64_t trace_file_size;
+    uint8_t *trace_buffer = NULL;
 
-    result = ha_session_alloc(&session, hive_path, trace_path, slid_load_sideband_address - binary_offset_sideband);
-    if (result) {
+    /* Copy in the trace file */
+
+    fd = open(trace_path, O_RDONLY);
+    if (fd < 0) {
+        printf(TAG "Could not open file '%s'!\n", trace_path);
+        goto CLEANUP;
+    }
+
+    struct stat sb;
+    int stat_result = fstat(fd, &sb);
+    if (stat_result < 0) {
+        printf(TAG "Could not stat file '%s'!\n", trace_path);
+        goto CLEANUP;
+    }
+    trace_file_size = sb.st_size;
+
+    trace_map_handle = mmap(NULL, sb.st_size, PROT_READ, MAP_SHARED, fd, 0);
+    if (trace_map_handle == MAP_FAILED) {
+        printf(TAG "Could not mmap file '%s'!\n", trace_path);
+        goto CLEANUP;
+    }
+
+    if (!(trace_buffer = malloc(trace_file_size + 1 /* Required for ha_session and ha_decoder */))) {
+        printf(TAG "Out of memory\n");
+        goto CLEANUP;
+    }
+    memcpy(trace_buffer, trace_map_handle, trace_file_size);
+
+    /* Setup the session */
+
+    uint64_t trace_base_address = slid_load_sideband_address - binary_offset_sideband;
+    if ((result = ha_session_alloc(&session, hive_path)) < 0
+        || (result = ha_session_reconfigure_with_rw_trace_buffer(session, trace_buffer, trace_file_size,
+                                                                 trace_base_address))) {
         printf(TAG "Failed to start session, error=%d\n", result);
         goto CLEANUP;
     }
 
+    /* Execute our operation */
+
     uint64_t start = current_clock();
     uint64_t stop;
     if (task == EXECUTION_TASK_AUDIT) {
-        result = ha_session_audit_perform_libipt_audit(session, binary_path);
+        result = ha_session_audit_perform_libipt_audit(session, binary_path, trace_buffer, trace_file_size);
         stop = current_clock();
 
         if (result < 0) {
@@ -124,10 +169,25 @@ int main(int argc, const char * argv[]) {
         }
     }
 
-    printf(TAG "Execute time = %llu ns\n", stop - start);
+    printf(TAG "Execute time = %"PRIu64" ns\n", stop - start);
 
     /* Completed OK, clear the result if there is any */
     CLEANUP:
+    if (session) {
         ha_session_free(session);
+    }
+
+    if (fd > 0) {
+        close(fd);
+    }
+
+    if (trace_map_handle && trace_map_handle != MAP_FAILED) {
+        munmap(trace_map_handle, trace_file_size);
+    }
+
+    if (trace_buffer) {
+        free(trace_buffer);
+    }
+
     return -result;
 }

@@ -14,7 +14,7 @@ target_include_directories(honey_hive_generator PRIVATE ${CMAKE_SOURCE_DIR}/depe
 target_link_libraries(honey_hive_generator ${CMAKE_SOURCE_DIR}/dependencies/xed/obj/libxed.a)
 
 project(honey_analyzer C)
-add_library(honey_analyzer SHARED
+add_library(honey_analyzer STATIC
         honey_analyzer/trace_analysis/ha_session.c
         honey_analyzer/trace_analysis/ha_session.h
         honey_analyzer/processor_trace/ha_pt_decoder.c
@@ -43,9 +43,13 @@ add_executable(honey_tester
         honeybee_shared/hb_hive.h)
 target_include_directories(honey_tester PRIVATE ${CMAKE_SOURCE_DIR}/dependencies/libipt/libipt/include)
 target_link_libraries(honey_tester ${CMAKE_SOURCE_DIR}/dependencies/libipt/lib/libipt.a)
-target_compile_options(honey_tester PRIVATE -Ofast)
+#target_compile_options(honey_tester PRIVATE -Ofast)
 
-
+project(honey_capture C)
+add_executable(honey_capture
+        honey_capture/main.c honey_capture/main.c
+        honey_capture/main_simplept.c
+        honeybee_shared/hb_driver_packets.h)
 
 #target_compile_options(honey_analyzer PRIVATE -fno-omit-frame-pointer -fsanitize=address)
 #target_link_options(honey_analyzer PRIVATE -fno-omit-frame-pointer -fsanitize=address)

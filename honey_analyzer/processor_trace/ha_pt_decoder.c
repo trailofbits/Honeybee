@@ -32,12 +32,7 @@ SOFTWARE.
 
 #include "ha_pt_decoder.h"
 #include <stdlib.h>
-#include <stdio.h>
 #include <string.h>
-#include <unistd.h>
-#include <sys/mman.h>
-#include <sys/stat.h>
-#include <fcntl.h>
 #include <stdbool.h>
 #include "../ha_debug_switch.h"
 
@@ -140,63 +135,8 @@ static uint8_t psb[16] = {
 
 #define TAG "[" __FILE__"] "
 
-ha_pt_decoder_t ha_pt_decoder_alloc(const char *trace_path) {
-    bool success = false;
-    int result;
-    int fd = 0;
-    uint8_t *map_handle = NULL;
-    struct stat sb;
-    ha_pt_decoder *decoder = NULL;
-
-    decoder = calloc(1, sizeof(ha_pt_decoder));
-    if (!decoder) {
-        printf(TAG "Failed to allocate decoder struct!\n");
-        goto CLEANUP;
-    }
-
-    fd = open(trace_path, O_RDONLY);
-    if (fd < 0) {
-        printf(TAG "Failed to open trace!\n");
-        result = fd;
-        goto CLEANUP;
-    }
-
-    if ((result = fstat(fd, &sb)) < 0) {
-        printf(TAG "Failed to fstat!\n");
-        goto CLEANUP;
-    }
-
-    //For performance, we don't actually check bounds. What we do is we manually insert a byte at the end of the
-    //trace which the decoder knows as an "end of trace" signal, or a stop codon.
-    //We take advantage of the fact that mmap allows you to map regions larger than the size of the object. We use
-    //MAP_PRIVATE to prevent changes from being shared back to the file. This results in making the last page dirty.
-    //FIXME: This works on Linux if the file is a multiple of the page size but not on macOS (where we get a segfault).
-    // I'm leaving this for now since eventually we're going to mmap from the kernel anyways and can skip file IO.
-    map_handle = mmap(NULL, sb.st_size + 1 /* extra byte is for the stop codon */, PROT_READ | PROT_WRITE,
-                      MAP_PRIVATE, fd, /*offset*/ 0);
-    if (map_handle == MAP_FAILED) {
-        printf(TAG "Failed to mmap outer PT buffer!\n");
-        goto CLEANUP;
-    }
-    decoder->pt_buffer = map_handle;
-    decoder->pt_buffer_length = sb.st_size;
-    decoder->i_pt_buffer = decoder->pt_buffer;
-
-    //Write the stop codon
-    map_handle[sb.st_size] = PT_TRACE_END;
-    success = true;
-
-    CLEANUP:
-    if (fd >= 0) {
-        close(fd);
-    }
-
-    if (success) {
-        return decoder;
-    } else {
-        ha_pt_decoder_free(decoder);
-        return NULL;
-    }
+ha_pt_decoder_t ha_pt_decoder_alloc(void) {
+    return calloc(1, sizeof(ha_pt_decoder));
 }
 
 void ha_pt_decoder_free(ha_pt_decoder_t decoder) {
@@ -204,20 +144,19 @@ void ha_pt_decoder_free(ha_pt_decoder_t decoder) {
         return;
     }
 
-    if (decoder->pt_buffer) {
-        munmap(decoder->pt_buffer, decoder->pt_buffer_length + 1 /* stop codon */);
-        decoder->pt_buffer = NULL;
-        decoder->i_pt_buffer = NULL;
-    }
-
     free(decoder);
 }
 
-void ha_pt_decoder_reset(ha_pt_decoder_t decoder) {
-    decoder->i_pt_buffer = decoder->pt_buffer;
-    decoder->last_tip = 0;
-    decoder->is_in_ovf_state = 0;
-    bzero(&decoder->cache, sizeof(ha_pt_decoder_cache));
+void ha_pt_decoder_reconfigure_with_trace(ha_pt_decoder_t decoder, uint8_t *trace_buffer, uint64_t trace_length) {
+    /* clear all state (including our embedded cache) */
+    bzero(decoder, sizeof(ha_pt_decoder));
+
+    //Terminate the trace buffer. This is safe because a pre-req is that trace_buffer must have trace_length + 1 bytes
+    trace_buffer[trace_length] = PT_TRACE_END;
+
+    decoder->pt_buffer = trace_buffer;
+    decoder->i_pt_buffer = trace_buffer;
+    decoder->pt_buffer_length = trace_length;
 }
 
 

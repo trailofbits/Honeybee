@@ -9,11 +9,6 @@
 #include "../../honeybee_shared/hb_hive.h"
 
 /**
- * A function which the block decoder will call whenever it encounters a block
- */
-typedef void (ha_hive_on_block_function)(ha_session_t session, uint64_t unslid_ip);
-
-/**
  * This is the internal representation of an ha_session. This is exposed in a separate header for custom loggers. If
  * you are consuming an ha_session_t you should not use this.
  */
@@ -38,19 +33,10 @@ typedef struct internal_ha_session {
     */
     ha_hive_on_block_function *on_block_function;
 
-
     /**
      * An addition field which custom decoders can use
      */
     void *extra_context;
 } ha_session;
-
-
-/**
- * This is the internal call to initiate block decoding. You should gate this behind configuration and other
- * pre-flight activities since little is done to ensure the state is valid once block decoding has started
- * @return A negative code on error. An end-of-stream error is the expected exit code.
- */
-int64_t ha_session_block_decode(ha_session_t session);
 
 #endif //HONEY_ANALYZER_HA_SESSION_INTERNAL_H

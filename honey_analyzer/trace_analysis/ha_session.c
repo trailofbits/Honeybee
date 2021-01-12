@@ -15,10 +15,10 @@
  */
 #define LO32(x) ((uint32_t)(x))
 
-int ha_session_alloc(ha_session_t *session_out, const char *hive_path, const char *trace_path, uint64_t trace_slide) {
+int ha_session_alloc(ha_session_t *session_out, const char *hive_path) {
     int result = 0;
 
-    if (!(session_out && trace_path)) {
+    if (!(session_out && hive_path)) {
         //Invalid argument
         result = -1;
         goto CLEANUP;
@@ -35,18 +35,9 @@ int ha_session_alloc(ha_session_t *session_out, const char *hive_path, const cha
         goto CLEANUP;
     }
 
-    session->trace_slide = trace_slide;
-
-    session->decoder = ha_pt_decoder_alloc(trace_path);
+    session->decoder = ha_pt_decoder_alloc();
     if (!session->decoder) {
         result = -3;
-        goto CLEANUP;
-    }
-
-    /* POST INIT -- all structure objects MUST be created before this point */
-
-    result = ha_pt_decoder_sync_forward(session->decoder);
-    if (result < 0) {
         goto CLEANUP;
     }
 
@@ -66,6 +57,19 @@ int ha_session_alloc(ha_session_t *session_out, const char *hive_path, const cha
     return result;
 }
 
+int ha_session_reconfigure_with_rw_trace_buffer(ha_session_t session, uint8_t *trace_buffer, uint64_t trace_length,
+                                                uint64_t trace_slide) {
+    if (!(session && trace_buffer)) {
+        return -1;
+    }
+
+    session->trace_slide = trace_slide;
+    ha_pt_decoder_reconfigure_with_trace(session->decoder, trace_buffer, trace_length);
+
+    return ha_pt_decoder_sync_forward(session->decoder);
+}
+
+
 void ha_session_free(ha_session_t session) {
     if (!session) {
         return;
@@ -84,17 +88,36 @@ void ha_session_free(ha_session_t session) {
     free(session);
 }
 
+/**
+ * Initiates a block level trace decode using the session's on_block_function and extra_context
+ * @param session
+ * @return A negative code on error. An end-of-stream error is the expected exit code.
+ */
 __attribute__ ((hot))
-int64_t ha_session_block_decode(ha_session_t session) {
+int64_t block_decode(ha_session_t session) {
     uint64_t index;
     uint64_t vip;
     uint64_t *blocks = session->hive->blocks;
     int64_t status;
+#if HA_BLOCK_REPORTS_ARE_EDGE_TRANSITIONS
+    uint64_t last_report = 0;
+#endif
 
     //We need to take an indirect jump since we currently don't have a starting state
     goto TRACE_INIT;
     while (status >= 0) {
-        session->on_block_function(session, LO32(vip) + session->hive->uvip_slide);
+#if HA_BLOCK_REPORTS_ARE_EDGE_TRANSITIONS
+        //This is the AFL edge transition function
+        uint64_t report = (last_report << 1) ^ LO32(index);
+        session->on_block_function(session, session->extra_context, report);
+        last_report = LO32(index);
+#else
+        session->on_block_function(session, session->extra_context, LO32(vip) + session->hive->uvip_slide);
+#endif
+
+        if (LO32(index) >= session->hive->block_count) {
+            return -HA_PT_DECODER_INTERNAL;
+        }
 
         /* if we inline both take_conditional and take_indirect and have them both pre-fetched, we can do a branchless increment on the value we consume */
         vip = blocks[2 * LO32(index) + 1];
@@ -104,7 +127,7 @@ int64_t ha_session_block_decode(ha_session_t session) {
             uint64_t result = ha_pt_decoder_cache_query_tnt(session->decoder, &vip);
             if (result == 2 /* override */) {
 #if HA_ENABLE_ANALYSIS_LOGS
-                printf("\tTNT result = 2: override destination to %p\n", (void *)vip);
+                printf("\tTNT result = 2: override destination to %p\n", (void *) vip);
 #endif
                 vip -= session->trace_slide;
                 index = hb_hive_virtual_address_to_block_index(session->hive, vip);
@@ -134,26 +157,86 @@ int64_t ha_session_block_decode(ha_session_t session) {
             vip -= session->hive->uvip_slide;
 
 #if HA_ENABLE_ANALYSIS_LOGS
-            printf("\tIndirect: vip = %p\n", (void *)(uint64_t)(LO32(vip)));
+            printf("\tIndirect: vip = %p\n", (void *) (uint64_t) (LO32(vip)));
 #endif
         }
     }
 
     return status;
 }
+//static int64_t block_decode(ha_session_t session) {
+//    uint64_t index;
+//    uint64_t vip;
+//    uint64_t *blocks = session->hive->blocks;
+//    int64_t status;
+//
+//    //We need to take an indirect jump since we currently don't have a starting state
+//    goto TRACE_INIT;
+//    while (status >= 0) {
+//        session->on_block_function(session, session->extra_context, LO32(vip) + session->hive->uvip_slide);
+//
+//        if (LO32(index) >= session->hive->block_count) {
+//            return -HA_PT_DECODER_INTERNAL;
+//        }
+//
+//        /* if we inline both take_conditional and take_indirect and have them both pre-fetched, we can do a branchless increment on the value we consume */
+//        vip = blocks[2 * LO32(index) + 1];
+//        index = blocks[2 * LO32(index)];
+//
+//        if (index & HB_HIVE_FLAG_IS_CONDITIONAL) {
+//            uint64_t result = ha_pt_decoder_cache_query_tnt(session->decoder, &vip);
+//            if (result == 2 /* override */) {
+//#if HA_ENABLE_ANALYSIS_LOGS
+//                printf("\tTNT result = 2: override destination to %p\n", (void *)vip);
+//#endif
+//                vip -= session->trace_slide;
+//                index = hb_hive_virtual_address_to_block_index(session->hive, vip);
+//            } else if (result == 1 /* taken */) {
+//                index >>= 1;
+//#if HA_ENABLE_ANALYSIS_LOGS
+//                printf("\tTNT result = 1: vip = %p\n", (void *)(uint64_t)(LO32(vip)) + session->hive->uvip_slide);
+//#endif
+//            } else if (result == 0 /* not taken */) {
+//                index >>= 33;
+//                vip >>= 32;
+//
+//#if HA_ENABLE_ANALYSIS_LOGS
+//                printf("\tTNT result = 0: vip = %p\n", (void *)(uint64_t)(LO32(vip)) + session->hive->uvip_slide);
+//#endif
+//            }
+//        } else {
+//            /* taken or direct -- cuts off the conditional flag or the zero bit if NT */
+//            index >>= 1;
+//        }
+//
+//        if (LO32(index) == HB_HIVE_FLAG_INDIRECT_JUMP_INDEX_VALUE) {
+//            TRACE_INIT:
+//            status = ha_pt_decoder_cache_query_indirect(session->decoder, &vip);
+//            vip -= session->trace_slide;
+//            index = hb_hive_virtual_address_to_block_index(session->hive, vip);
+//            vip -= session->hive->uvip_slide;
+//
+//#if HA_ENABLE_ANALYSIS_LOGS
+//            printf("\tIndirect: vip = %p\n", (void *)(uint64_t)(LO32(vip)));
+//#endif
+//        }
+//    }
+//
+//    return status;
+//}
 
 
-//MARK: - Simple custom trace implementations
+int ha_session_decode(ha_session_t session, ha_hive_on_block_function *on_block_function, void *context) {
+    session->on_block_function = on_block_function;
+    session->extra_context = context;
 
-int ha_session_generate_coverage(ha_session_t session) {
-    //FIXME: Not implemented
-    abort();
+    return block_decode(session);
 }
 
 //int c = 0;
-static void print_trace(ha_session_t session, uint64_t unslid_ip) {
+static void print_trace(ha_session_t session, void *context, uint64_t unslid_ip) {
 #if HA_ENABLE_BLOCK_LEVEL_LOGS
-    printf("%p\n", (void *)unslid_ip);
+    printf("%p\n", (void *) unslid_ip);
 #endif
 //    if (c == 5) {
 //        printf("STOP!\n");
@@ -162,9 +245,8 @@ static void print_trace(ha_session_t session, uint64_t unslid_ip) {
 }
 
 int ha_session_print_trace(ha_session_t session) {
-    session->on_block_function = print_trace;
 #if HA_ENABLE_BLOCK_LOGS
     printf(TAG "--BEGIN TRACE DECODE--\n");
 #endif
-    return ha_session_block_decode(session);
+    return ha_session_decode(session, print_trace, NULL);
 }

@@ -8,6 +8,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/mman.h>
+#include <inttypes.h>
 
 #include "intel-pt.h"
 
@@ -26,8 +27,8 @@ typedef struct {
     uint64_t honey_blocks_passed;
 } audit_extra;
 
-static void libipt_audit_on_block(ha_session_t session, uint64_t hive_unslid_ip) {
-    audit_extra *extra = session->extra_context;
+static void libipt_audit_on_block(ha_session_t session, void *context, uint64_t hive_unslid_ip) {
+    audit_extra *extra = context;
     if (extra->status) {
         //We don't actually have a way to abort a trace in progress, however we will refuse to continue the test so
         // as to not destroy the original error
@@ -82,14 +83,14 @@ static void libipt_audit_on_block(ha_session_t session, uint64_t hive_unslid_ip)
         goto FUP_TRY_AGAIN;
     } else {
         printf(TAG "*** AUDIT FAILED ***\n");
-        printf(TAG "hive = %p, libipt = %p [honey_blocks = %llu]\n",
-               (void *)hive_unslid_ip, (void *)libipt_unslid, extra->honey_blocks_passed);
-        extra->status = -HA_SESSION_AUDIT_TEST_INCORRECT_RESULT;
-//        asm("ud2");
+        printf(TAG "hive = %p, libipt = %p [honey_blocks = %"PRIu64"]\n",
+               (void *) hive_unslid_ip, (void *) libipt_unslid, extra->honey_blocks_passed);
+//        extra->status = -HA_SESSION_AUDIT_TEST_INCORRECT_RESULT;
     }
 }
 
-int ha_session_audit_perform_libipt_audit(ha_session_t session, const char *binary_path) {
+int ha_session_audit_perform_libipt_audit(ha_session_t session, const char *binary_path,
+                                          uint8_t *trace_buffer, uint64_t trace_length) {
     int result = 0;
     int fd = 0;
     struct stat sb;
@@ -125,13 +126,10 @@ int ha_session_audit_perform_libipt_audit(ha_session_t session, const char *bina
     }
 
     /* libipt configuration */
-    uint8_t *trace_ptr = NULL;
-    uint64_t trace_length = 0;
-    ha_pt_decoder_internal_get_trace_buffer(session->decoder, &trace_ptr, &trace_length);
     struct pt_config config;
     config.size = sizeof(struct pt_config);
-    config.begin = trace_ptr;
-    config.end = trace_ptr + trace_length;
+    config.begin = trace_buffer;
+    config.end = trace_buffer + trace_length;
     //Stop on all control flow in order to duplicate the behavior of mirrors
     config.flags.variant.block.end_on_jump = 1;
     config.flags.variant.block.end_on_call = 1;
@@ -153,11 +151,9 @@ int ha_session_audit_perform_libipt_audit(ha_session_t session, const char *bina
 
     //Stash the block_decoder pointer so the logger function can access it
     extra->block_decoder = block_decoder;
-    session->extra_context = extra;
 
     //Kickoff mirror decoding from our side
-    session->on_block_function = libipt_audit_on_block;
-    result = ha_session_block_decode(session);
+    result = ha_session_decode(session, libipt_audit_on_block, extra);
 
     //Figure out which result we want to end with. We want the EARLIEST error.
     if (extra->status != HA_SESSION_AUDIT_TEST_PASS) {

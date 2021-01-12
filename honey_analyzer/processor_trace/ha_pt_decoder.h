@@ -87,32 +87,40 @@ typedef struct internal_ha_pt_decoder {
  * @param trace_path The path to the trace file
  * @return The tracer session or NULL
  */
-ha_pt_decoder_t ha_pt_decoder_alloc(const char *trace_path);
+
+/**
+ * Creates a new trace session from a R/W buffer which contains the trace data. The trace buffer must have AT LEAST
+ * one extra byte of space after the end of the trace. This is a performance hack borrowed from libxdc.
+ * @param session_out The location to place a pointer to the created session. On error, left unchanged.
+ * @param hive_path The path to the Honeybee hive to use for decoding this trace.
+ * at least one byte more than this value.
+ * @param trace_slide The ASLR shifted base address of the binary for this trace
+ * @return Error code. On success, zero is returned
+ */
+
+/**
+ * Allocates a new decoder. The decoder does not initially have a trace installed.
+ */
+ha_pt_decoder_t ha_pt_decoder_alloc(void);
 
 /** Frees a decoder and all other owned resources. */
 void ha_pt_decoder_free(ha_pt_decoder_t decoder);
 
-/** Resets a decoder to the state it was just after _alloc. */
-void ha_pt_decoder_reset(ha_pt_decoder_t decoder);
+/**
+ * (Re)configures the decoder with a new trace buffer. This operation clears all internal state.
+ * @param trace_buffer The pointer to the start of the buffer containing the trace data. NOTE: This buffer is NOT
+ * owned by the decoder--you are still responsible for freeing it (and any buffer replaced by this operation).
+ * @param trace_length The length of the trace (read: NOT THE BUFFER ITSELF). The actual length of the buffer must be
+ */
+void ha_pt_decoder_reconfigure_with_trace(ha_pt_decoder_t decoder, uint8_t *trace_buffer, uint64_t trace_length);
 
 /** Sync the decoder forwards towards the first PSB. Returns -ha_pt_decoder_status on error. */
 int ha_pt_decoder_sync_forward(ha_pt_decoder_t decoder);
 
-/**
- * Get a pointer to the cache struct. You do not own this pointer, however you may consume data from it and should
- * update state appropriately using ha_pt_decoder_cache_xxxxxx methods.
- */
-ha_pt_decoder_cache *ha_pt_decoder_get_cache_ptr(ha_pt_decoder_t decoder);
-
-/**
- * Copies the internal trace buffer information. This is meant for testing, mostly.
- */
-void ha_pt_decoder_internal_get_trace_buffer(ha_pt_decoder_t decoder, uint8_t **trace, uint64_t *trace_length);
-
 /** Runs the decode process until one of the two caches fills */
 int ha_pt_decoder_decode_until_caches_filled(ha_pt_decoder_t decoder);
 
-
+//MARK: -- Inline exports
 
 #define unlikely(x)     __builtin_expect((x),0)
 
