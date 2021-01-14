@@ -9,6 +9,7 @@
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <inttypes.h>
+#include <time.h>
 
 #include "intel-pt.h"
 
@@ -17,8 +18,6 @@
 #include "../../honey_analyzer/ha_debug_switch.h"
 
 #define TAG "[" __FILE__ "] "
-
-
 
 typedef struct {
     struct pt_block_decoder *block_decoder;
@@ -148,7 +147,6 @@ int ha_session_audit_perform_libipt_audit(ha_session_t session, const char *bina
         goto CLEANUP;
     }
 
-
     //Stash the block_decoder pointer so the logger function can access it
     extra->block_decoder = block_decoder;
 
@@ -166,6 +164,172 @@ int ha_session_audit_perform_libipt_audit(ha_session_t session, const char *bina
 
     result = HA_SESSION_AUDIT_TEST_PASS;
 
+    CLEANUP:
+    if (block_decoder) {
+        pt_blk_free_decoder(block_decoder);
+    }
+
+    if (fd >= 0) {
+        close(fd);
+    }
+
+    if (extra) {
+        free(extra);
+    }
+
+    return result;
+}
+
+static long current_clock() {
+    struct timespec tv;
+    clock_gettime(CLOCK_MONOTONIC_RAW, &tv);
+
+    return tv.tv_sec * 1e9 + tv.tv_nsec;
+}
+
+__attribute__((optnone))
+static void nop_decode_block(ha_session_t session, void *context, uint64_t block) {
+
+}
+
+int ha_session_audit_libipt_drag_race(ha_session_t session, unsigned int iterations, const char *binary_path,
+                                      uint8_t *trace_buffer, uint64_t trace_length) {
+    int result = 0;
+    int fd = 0;
+    struct stat sb;
+    struct pt_block_decoder *block_decoder = NULL;
+    const char *map_handle = NULL;
+    audit_extra *extra = NULL;
+
+    //Map in the binary for libipt
+    fd = open(binary_path, O_RDONLY);
+    if (fd < 0) {
+        printf(TAG "Failed to open binary!\n");
+        result = -HA_SESSION_AUDIT_TEST_INIT_FAILED;
+        goto CLEANUP;
+    }
+
+    if ((result = fstat(fd, &sb)) < 0) {
+        printf(TAG "Failed to fstat!\n");
+        result = -HA_SESSION_AUDIT_TEST_INIT_FAILED;
+        goto CLEANUP;
+    }
+
+    map_handle = mmap(NULL, sb.st_size, PROT_READ, MAP_SHARED, fd, 0);
+    if (map_handle == MAP_FAILED) {
+        printf(TAG "mmap failed!\n");
+        result = -HA_SESSION_AUDIT_TEST_INIT_FAILED;
+        goto CLEANUP;
+    }
+
+    extra = calloc(1, sizeof(audit_extra));
+    if (!extra) {
+        result = -11;
+        goto CLEANUP;
+    }
+
+    /* libipt configuration */
+    struct pt_config config;
+    config.size = sizeof(struct pt_config);
+    config.begin = trace_buffer;
+    config.end = trace_buffer + trace_length;
+    //Stop on all control flow in order to duplicate the behavior of mirrors
+    config.flags.variant.block.end_on_jump = 1;
+    config.flags.variant.block.end_on_call = 1;
+
+    block_decoder = pt_blk_alloc_decoder(&config);
+
+    if (!block_decoder) {
+        result = -HA_SESSION_AUDIT_TEST_INIT_FAILED;
+        goto CLEANUP;
+    }
+
+    struct pt_image *image_unowned = pt_blk_get_image(block_decoder);
+    if ((result = pt_image_add_file(image_unowned, binary_path, 0x00, sb.st_size, NULL, session->trace_slide)) < 0
+        || (result = pt_blk_sync_forward(block_decoder)) < 0) {
+        result = -HA_SESSION_AUDIT_TEST_INIT_FAILED;
+        goto CLEANUP;
+    }
+
+    uint64_t total_libipt_time = 0;
+    /* Test libipt */
+    for (unsigned int i = 0; i < iterations; i++) {
+        uint64_t start = current_clock();
+        struct pt_block block;
+        while (1) {
+            result = pt_blk_next(block_decoder, &block, sizeof(block));
+            while (result & pts_event_pending) {
+                if (result < 0 && result) {
+                    break;
+                }
+                struct pt_event event;
+                result = pt_blk_event(block_decoder, &event, sizeof(event));
+            }
+
+            if (block.ninsn) {
+                //Force a reporting function call since we'd use one in a real test
+                nop_decode_block(session, NULL, block.ip);
+            }
+
+            if (result < 0) {
+                break;
+            }
+        }
+        uint64_t stop = current_clock();
+
+        if (result < 0 && result != -pte_eos) {
+            printf(TAG "Drag race failed, ipt failed to decode. error=%d (%s)\n", result,
+                   pt_errstr(pt_errcode(result)));
+
+            goto CLEANUP;
+        }
+
+        //Reconfigure the decoder to prepare for the next round. libipt is a bit odd and so we just have to sync
+        // backwards repeatedly to get to the start...
+//        while ((result = pt_blk_sync_backward(block_decoder)) >= 0);
+        pt_blk_sync_set(block_decoder, 0);
+        result = 0;
+
+//        printf(TAG "libipt round %u/%u: duration = %" PRIu64 "ns\n", i + 1, iterations, stop - start);
+        printf("%"PRIu64"\n", stop - start);
+
+        total_libipt_time += stop - start;
+    }
+
+    printf(TAG "libipt: rounds=%u, total time=%"PRIu64" ns, average=%f\n", iterations, total_libipt_time,
+           ((double) total_libipt_time) / iterations);
+
+    uint64_t total_honeybee_time = 0;
+    /* Test Honeybee */
+    for (unsigned int i = 0; i < iterations; i++) {
+        uint64_t start = current_clock();
+        result = ha_session_decode(session, nop_decode_block, NULL);
+        uint64_t stop = current_clock();
+
+        if (result < 0 && result != -HA_PT_DECODER_END_OF_STREAM) {
+            printf(TAG "Drag race failed, Honeybee failed to decode. error=%d\n", result);
+            goto CLEANUP;
+        }
+
+        //Reconfigure the decoder in to prepare for the next round
+        if ((result = ha_session_reconfigure_with_terminated_trace_buffer(session, trace_buffer,
+                                                                          trace_length, session->trace_slide)) < 0) {
+            printf(TAG "Drag race failed, Honeybee failed to reset. error=%d\n", result);
+            goto CLEANUP;
+        }
+
+//        printf(TAG "Honeybee round %u/%u: duration = %" PRIu64 "ns\n", i + 1, iterations, stop - start);
+        printf("%"PRIu64"\n", stop - start);
+        total_honeybee_time += stop - start;
+    }
+
+    printf(TAG "Honeybee: rounds=%u, total time=%"PRIu64" ns, average=%f\n", iterations, total_honeybee_time,
+           ((double) total_honeybee_time) / iterations);
+
+    printf(TAG "Honeybee speedup = %f\n", ((double) total_libipt_time) / total_honeybee_time);
+
+
+    result = 0;
     CLEANUP:
     if (block_decoder) {
         pt_blk_free_decoder(block_decoder);

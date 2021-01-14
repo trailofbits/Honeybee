@@ -21,10 +21,10 @@
 #define TAG "[" __FILE__"] "
 
 enum execution_task {
-    EXECUTION_TASK_UNKNOWN, EXECUTION_TASK_AUDIT, EXECUTION_TASK_PERFORMANCE
+    EXECUTION_TASK_UNKNOWN, EXECUTION_TASK_AUDIT, EXECUTION_TASK_PERFORMANCE, EXECUTION_TASK_RACE
 };
 
-long current_clock() {
+static long current_clock() {
     struct timespec tv;
     clock_gettime(CLOCK_MONOTONIC_RAW, &tv);
 
@@ -41,13 +41,16 @@ int main(int argc, const char * argv[]) {
     uint64_t binary_offset_sideband = -1;
 
     int opt = 0;
-    while ((opt = getopt(argc, (char *const *) argv, "aph:s:o:t:b:")) != -1) {
+    while ((opt = getopt(argc, (char *const *) argv, "aprh:s:o:t:b:")) != -1) {
         switch (opt) {
             case 'a':
                 task = EXECUTION_TASK_AUDIT;
                 break;
             case 'p':
                 task = EXECUTION_TASK_PERFORMANCE;
+                break;
+            case 'r':
+                task = EXECUTION_TASK_RACE;
                 break;
             case 'h':
                 hive_path = optarg;
@@ -75,6 +78,7 @@ int main(int argc, const char * argv[]) {
                         "Usage:\n"
                         "-a Run a correctness audit using libipt\n"
                         "-p Run a performance test\n"
+                        "-r Run a drag race between libipt and Honeybee\n"
                         "-h The path to the Honeybee Hive to use to decode the trace\n"
                         "-s The slid binary address according to sideband\n"
                         "-o The executable segment offset according to sideband\n"
@@ -92,8 +96,8 @@ int main(int argc, const char * argv[]) {
         goto SHOW_USAGE;
     }
 
-    if (task == EXECUTION_TASK_AUDIT && !binary_path) {
-        printf(TAG "Binary path is required for audits\n");
+    if ((task == EXECUTION_TASK_AUDIT || task == EXECUTION_TASK_RACE) && !binary_path) {
+        printf(TAG "Binary path is required for test run mode\n");
         goto SHOW_USAGE;
     }
 
@@ -164,7 +168,7 @@ int main(int argc, const char * argv[]) {
         } else {
             printf(TAG "Test pass!\n");
         }
-    } else {
+    } else if (task == EXECUTION_TASK_PERFORMANCE) {
         result = ha_session_print_trace(session);
         stop = current_clock();
 
@@ -174,6 +178,15 @@ int main(int argc, const char * argv[]) {
             printf(TAG "Decode success!\n");
             result = 0;
         }
+    } else {
+        result = ha_session_audit_libipt_drag_race(session, 25, binary_path, trace_buffer, trace_file_size);
+        stop = current_clock();
+
+        if (result < 0) {
+            printf(TAG "Drag race failed = %d\n", result);
+        }
+
+        result = 0;
     }
 
     printf(TAG "Execute time = %"PRIu64" ns\n", stop - start);

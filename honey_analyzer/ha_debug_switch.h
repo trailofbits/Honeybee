@@ -14,5 +14,5 @@
 #define HA_ENABLE_ANALYSIS_LOGS 0
 /** Controls block logging for both print blocks and unit tests. Disable this for performance tests. */
 #define HA_ENABLE_BLOCK_LEVEL_LOGS 0
-#define HA_BLOCK_REPORTS_ARE_EDGE_TRANSITIONS 1
+#define HA_BLOCK_REPORTS_ARE_EDGE_TRANSITIONS 0
 #endif //HONEY_MIRROR_HA_DEBUG_SWITCH_H

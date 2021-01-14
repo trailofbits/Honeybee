@@ -46,6 +46,6 @@ add_executable(honey_tester
         honeybee_shared/hb_hive.h honey_analyzer/processor_trace/ha_pt_decoder_constants.h honey_analyzer/honey_analyzer.h)
 target_include_directories(honey_tester PRIVATE ${CMAKE_SOURCE_DIR}/dependencies/libipt/libipt/include)
 target_link_libraries(honey_tester ${CMAKE_SOURCE_DIR}/dependencies/libipt/lib/libipt.a)
-#target_compile_options(honey_tester PRIVATE -Ofast)
+target_compile_options(honey_tester PRIVATE -Ofast)
 #target_compile_options(honey_analyzer PRIVATE -fno-omit-frame-pointer -fsanitize=address)
 #target_link_options(honey_analyzer PRIVATE -fno-omit-frame-pointer -fsanitize=address)

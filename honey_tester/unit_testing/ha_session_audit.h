@@ -29,4 +29,7 @@ enum ha_session_audit_status {
 int ha_session_audit_perform_libipt_audit(ha_session_t session, const char *binary_path,
                                           uint8_t *trace_buffer, uint64_t trace_length);
 
+int ha_session_audit_libipt_drag_race(ha_session_t session, unsigned int iterations, const char *binary_path,
+                                      uint8_t *trace_buffer, uint64_t trace_length);
+
 #endif //HONEY_ANALYZER_HA_SESSION_AUDIT_H
