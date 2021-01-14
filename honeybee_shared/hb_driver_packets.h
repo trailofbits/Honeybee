@@ -46,6 +46,11 @@ typedef struct {
      * If zero, tracing is stopped, this terminates the trace buffer by placing a stop codon at the end of the trace.
      */
     uint8_t enabled;
+
+    /**
+     * If non-zero, the trace output will be reset.
+     */
+    uint8_t reset_output;
 } hb_driver_packet_set_enabled;
 
 #define HB_DRIVER_PACKET_IOC_SET_ENABLED _IOR(HB_DRIVER_PACKET_IOC_MAGIC, 2, hb_driver_packet_set_enabled)

@@ -85,7 +85,7 @@ static void libipt_audit_on_block(ha_session_t session, void *context, uint64_t 
         printf(TAG "*** AUDIT FAILED ***\n");
         printf(TAG "hive = %p, libipt = %p [honey_blocks = %"PRIu64"]\n",
                (void *) hive_unslid_ip, (void *) libipt_unslid, extra->honey_blocks_passed);
-//        extra->status = -HA_SESSION_AUDIT_TEST_INCORRECT_RESULT;
+        extra->status = -HA_SESSION_AUDIT_TEST_INCORRECT_RESULT;
     }
 }
 

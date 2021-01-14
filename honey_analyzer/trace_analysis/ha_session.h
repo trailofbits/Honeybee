@@ -7,6 +7,7 @@
 
 #include <stdlib.h>
 #include <stdint.h>
+#include "../../honeybee_shared/hb_hive.h"
 
 typedef struct internal_ha_session *ha_session_t;
 
@@ -18,10 +19,10 @@ typedef void (ha_hive_on_block_function)(ha_session_t session, void *context, ui
 /**
  * Create a new trace session from a trace file
  * @param session_out The location to place a pointer to the created session. On error, left unchanged.
- * @param hive_path The path to the Honeybee hive to use for decoding this trace.
+ * @param hive The Honeybee hive to use for decoding this trace.
  * @return Error code. On success, zero is returned
  */
-int ha_session_alloc(ha_session_t *session_out, const char *hive_path);
+int ha_session_alloc(ha_session_t *session_out, hb_hive *hive);
 
 
 /**
@@ -32,8 +33,8 @@ int ha_session_alloc(ha_session_t *session_out, const char *hive_path);
  * @param trace_slide The base address of the binary for this trace in memory
  * @return Error code. On success, zero is returned
  */
-int ha_session_reconfigure_with_rw_trace_buffer(ha_session_t session, uint8_t *trace_buffer, uint64_t trace_length,
-                                                uint64_t trace_slide);
+int ha_session_reconfigure_with_terminated_trace_buffer(ha_session_t session, uint8_t *trace_buffer,
+                                                        uint64_t trace_length, uint64_t trace_slide);
 
 /**
  * Frees a session and all of its owned components

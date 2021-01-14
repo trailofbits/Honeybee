@@ -28,6 +28,8 @@ typedef enum {
     HA_PT_DECODER_TRACE_DESYNC = 4,
     /** An unsupported packet was found in the PT stream. */
     HA_PT_UNSUPPORTED_TRACE_PACKET = 5,
+    /** The target address was not found in the binary map. */
+    HA_PT_DECODER_NO_MAP = 6,
 } ha_pt_decoder_status;
 
 /** The number of elements our cache struct holds. This is a power of two so we can mask instead of modulo */
@@ -110,7 +112,7 @@ void ha_pt_decoder_free(ha_pt_decoder_t decoder);
  * (Re)configures the decoder with a new trace buffer. This operation clears all internal state.
  * @param trace_buffer The pointer to the start of the buffer containing the trace data. NOTE: This buffer is NOT
  * owned by the decoder--you are still responsible for freeing it (and any buffer replaced by this operation).
- * @param trace_length The length of the trace (read: NOT THE BUFFER ITSELF). The actual length of the buffer must be
+ * @param trace_length The length of the trace
  */
 void ha_pt_decoder_reconfigure_with_trace(ha_pt_decoder_t decoder, uint8_t *trace_buffer, uint64_t trace_length);
 

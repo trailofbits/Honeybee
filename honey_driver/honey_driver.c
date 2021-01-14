@@ -3,8 +3,19 @@
 //
 
 /*
- * This driver was built using sources from simple-pt. This file, and all of its modifications, is licensed under the
- * same terms.
+ * This driver was built using small bits of code and ideas borrowed from simple-pt. It does, however, have
+ * significant domain specific changes in order to support fuzzing under Honeybee as well as an entirely different
+ * control mechanism (we use pure ioctls instead of simple-pt's array of pseudo-files). It's important to note,
+ * however, that this driver is NOT intended for high-risk, security critical deployments. It should ONLY be used on
+ * otherwise secure machines for fuzzing. While an effort has been made to put guard rails on parts of this code,
+ * this was done primarily for system stability rather than to protect against malicious software. You should
+ * probably unload this module after use.
+ *
+ * This file, and all of its modifications, is licensed under the same terms as simple-pt. The original source from
+ * which this driver is partially derived from is online at:
+ * https://github.com/andikleen/simple-pt/blob/master/simple-pt.c
+ *
+ * The original license for simple-pt is reproduced below:
  *
  * Copyright (c) 2015, Intel Corporation
  * Author: Andi Kleen
@@ -63,7 +74,16 @@
 #include "../honeybee_shared/hb_driver_packets.h"
 #include "honey_driver_constants.h"
 
+#define ENABLE_LOGGING 0
+
+#if ENABLE_LOGGING
+#define LOGGER(format, ...) (printf("[" __FILE__ "] " format, ##__VA_ARGS__))
+#else
+#define LOGGER(format, ...)  (void)0
+#endif
+
 #define TAG "[honey_driver] "
+
 #define TAGI KERN_INFO TAG "[*] "
 #define TAGE KERN_ERR TAG  "[!] "
 
@@ -72,10 +92,10 @@
  */
 
 /**
- * Spinlock to protect global configuration. This is taken at the start of all ioctls and mmap operations to protect
+ * Mutex to protect global configuration. This is taken at the start of all ioctls and mmap operations to protect
  * our state.
  */
-static DEFINE_SPINLOCK(configuration_spinlock);
+static DEFINE_MUTEX(configuration_mutex);
 
 /**
  * The number of ToPA entries to allocate per CPU
@@ -250,7 +270,7 @@ static int allocate_pt_buffer_on_cpu(int cpu) {
 
         topa = (uint64_t *) __get_free_page(GFP_KERNEL | __GFP_ZERO);
         if (!topa) {
-            printk(TAGE "cpu %d, Cannot allocate topa page\n", cpu);
+            LOGGER(TAGE "cpu %d, Cannot allocate topa page\n", cpu);
             return -ENOMEM;
         }
 
@@ -264,7 +284,7 @@ static int allocate_pt_buffer_on_cpu(int cpu) {
                     topa_page_order);
 
             if (!buf) {
-                printk(TAGE "Cannot allocate %d'th PT buffer for CPU %d, truncating this ToPA buffer\n", n, cpu);
+                LOGGER(TAGE "Cannot allocate %d'th PT buffer for CPU %d, truncating this ToPA buffer\n", n, cpu);
                 break;
             }
 
@@ -429,14 +449,21 @@ static int configure_pt_on_cpu(int cpu, hb_driver_packet_configure_trace *config
 
 /**
  * Sets tracing status on this CPU
- * @param arg Non-zero to enable tracing
+ * @param arg hb_driver_packet_set_enabled *
  */
 static void set_pt_enable_on_this_cpu(void *arg) {
-    unsigned long long enable;
+    hb_driver_packet_set_enabled *set_enabled = arg;
     int status;
+    uint64_t enable;
     uint64_t ctl;
 
-    enable = (!(unsigned long long) arg) - 1; /* This is all ones if enabled and all zeros if disabled */
+    if (set_enabled->reset_output
+        && wrmsrl_safe(MSR_IA32_RTIT_OUTPUT_MASK_PTRS, 0ULL) /* reset our output pointers to the start */) {
+        status = HB_DRIVER_TRACE_STATUS_CONFIGURATION_WRITE_ERROR;
+    }
+
+    enable = (!(unsigned long long) set_enabled->enabled) -
+             1; /* This is all ones if enabled and all zeros if disabled */
 
     if (rdmsrl_safe(MSR_IA32_RTIT_CTL, &ctl)
         || wrmsrl_safe(MSR_IA32_RTIT_CTL, (ctl & ~TRACE_EN) | (enable & TRACE_EN))) {
@@ -476,34 +503,34 @@ static int intel_pt_hardware_support_preflight(void) {
 
     cpuid(0, &a, &b, &c, &d);
     if (a < 0x14) {
-        printk(TAGE "Not enough CPUID support for PT\n");
+        LOGGER(TAGE "Not enough CPUID support for PT\n");
         return -EIO;
     }
     cpuid_count(0x07, 0x0, &a, &b, &c, &d);
     if ((b & BIT(25)) == 0) {
-        printk(TAGE "No PT support\n");
+        LOGGER(TAGE "No PT support\n");
         return -EIO;
     }
 
     cpuid_count(0x14, 0x0, &a, &b, &c, &d);
 
     if (!(b & BIT(0))) {
-        printk(TAGE "No CR3 filter support\n");
+        LOGGER(TAGE "No CR3 filter support\n");
         return -EIO;
     }
 
     if (!(b & BIT(2))) {
-        printk(TAGE "IP filtering is not supported\n");
+        LOGGER(TAGE "IP filtering is not supported\n");
         return -EIO;
     }
 
     if (!(c & BIT(0))) {
-        printk(TAGE "No ToPA support\n");
+        LOGGER(TAGE "No ToPA support\n");
         return -EIO;
     }
 
     if (!(c & BIT(1))) {
-        printk(TAGE "ToPA does not support multiple entries\n");
+        LOGGER(TAGE "ToPA does not support multiple entries\n");
         return -EIO;
     }
 
@@ -517,13 +544,12 @@ static int intel_pt_hardware_support_preflight(void) {
  * Handles ioctls from userspace. Packets are defined in honeybee_shared/hb_driver_packets
  */
 static long honey_driver_ioctl(struct file *file, unsigned int cmd, unsigned long arg) {
-    unsigned long flags;
     long result;
 
     //Take the configuration lock. All operations touch state and so we really need those to be serial.
     //A reader-writer lock could be used but that's honestly a bit more complicated than really necessary since we
     // don't really expect to have THAT many concurrent operations
-    spin_lock_irqsave(&configuration_spinlock, flags);
+    mutex_lock(&configuration_mutex);
 
     switch (cmd) {
         case HB_DRIVER_PACKET_IOC_CONFIGURE_BUFFERS: {
@@ -531,7 +557,7 @@ static long honey_driver_ioctl(struct file *file, unsigned int cmd, unsigned lon
             int i;
             int cpu_count;
 
-            printk(TAGI "ioctl -- configure_buffers\n");
+            LOGGER(TAGI "ioctl -- configure_buffers\n");
 
             //XXX this doesn't actually work if you offline random cores in the middle (i.e. offline core 4 of 8) but
             // I'm choosing to ignore that because who offlines a CPU core while fuzzing??
@@ -572,9 +598,8 @@ static long honey_driver_ioctl(struct file *file, unsigned int cmd, unsigned lon
         }
         case HB_DRIVER_PACKET_IOC_SET_ENABLED: {
             hb_driver_packet_set_enabled set_enabled;
-            unsigned long long enabled_state;
 
-            printk(TAGI "ioctl -- set_enabled\n");
+            LOGGER(TAGI "ioctl -- set_enabled\n");
 
             if (copy_from_user(&set_enabled, (void *) arg, sizeof set_enabled) != 0
                 || !cpu_online(set_enabled.cpu_id)) {
@@ -598,8 +623,7 @@ static long honey_driver_ioctl(struct file *file, unsigned int cmd, unsigned lon
             }
 
             /* we are safe to enable PT */
-            enabled_state = set_enabled.enabled;
-            smp_do_on_cpu(set_enabled.cpu_id, set_pt_enable_on_this_cpu, (void *) enabled_state);
+            smp_do_on_cpu(set_enabled.cpu_id, set_pt_enable_on_this_cpu, (void *) &set_enabled);
 
             result = cpu_state_to_result(set_enabled.cpu_id);
             break;
@@ -607,7 +631,7 @@ static long honey_driver_ioctl(struct file *file, unsigned int cmd, unsigned lon
         case HB_DRIVER_PACKET_IOC_CONFIGURE_TRACE: {
             hb_driver_packet_configure_trace configure_trace;
 
-            printk(TAGI "ioctl -- configure_trace\n");
+            LOGGER(TAGI "ioctl -- configure_trace\n");
 
             if (!(topa_page_order && topa_buffer_count)) {
                 //Buffers must be configured before tracing can be configured
@@ -649,7 +673,7 @@ static long honey_driver_ioctl(struct file *file, unsigned int cmd, unsigned lon
             uint64_t packet_byte_count;
             uint64_t buffer_size;
 
-            printk(TAGI "ioctl -- get_trace_lengths\n");
+            LOGGER(TAGI "ioctl -- get_trace_lengths\n");
 
             if (copy_from_user(&get_lengths, (void *) arg, sizeof get_lengths) != 0
                 || !cpu_online(get_lengths.cpu_id)
@@ -694,9 +718,9 @@ static long honey_driver_ioctl(struct file *file, unsigned int cmd, unsigned lon
 
     OUT:
     //Unlock before we leave
-    spin_unlock_irqrestore(&configuration_spinlock, flags);
+    mutex_unlock(&configuration_mutex);
 
-    printk(TAGI "\tioctl result -> %ld\n", result);
+    LOGGER(TAGI "\tioctl result -> %ld\n", result);
 
     return result;
 }
@@ -713,14 +737,13 @@ static int honey_driver_mmap(struct file *file, struct vm_area_struct *vma) {
     unsigned long len = vma->vm_end - vma->vm_start;
     int cpu = vma->vm_pgoff;
     unsigned long buffer_size = PAGE_SIZE << topa_page_order;
-    unsigned long flags;
 
     //Take the configuration lock. All operations touch state and so we really need those to be serial.
     //A reader-writer lock could be used but that's honestly a bit more complicated than really necessary since we
     // don't really expect to have THAT many concurrent operations
-    spin_lock_irqsave(&configuration_spinlock, flags);
+    mutex_lock(&configuration_mutex);
 
-    printk(TAGI "mmap call for CPU %d, size = %lu\n", cpu, len);
+    LOGGER(TAGI "mmap call for CPU %d, size = %lu\n", cpu, len);
 
     if (!cpu_online(cpu)) {
         return -EINVAL;
@@ -752,7 +775,7 @@ static int honey_driver_mmap(struct file *file, struct vm_area_struct *vma) {
     result = 0;
     EXIT:
     //Unlock before we leave
-    spin_unlock_irqrestore(&configuration_spinlock, flags);
+    mutex_unlock(&configuration_mutex);
 
     return result;
 }
@@ -776,19 +799,19 @@ static int honey_driver_init(void) {
     int cpu_count;
     int i;
 
-    printk(TAGI "Starting...\n");
+    LOGGER(TAGI "Starting...\n");
 
     //Preflight check to make sure we support PT (plus to store various required information)
     result = intel_pt_hardware_support_preflight();
     if (result < 0) {
-        printk(TAGE "CPU does not support all required features, aborting...");
+        LOGGER(TAGE "CPU does not support all required features, aborting...");
         goto ABORT;
     }
 
     //Register our devfs node
     result = misc_register(&honey_driver_misc_dev);
     if (result < 0) {
-        printk(TAGE "Cannot register device\n");
+        LOGGER(TAGE "Cannot register device\n");
         goto ABORT;
     }
 
@@ -799,7 +822,7 @@ static int honey_driver_init(void) {
         per_cpu(trace_state, i) = HB_DRIVER_TRACE_STATUS_CORE_NOT_CONFIGURED;
     }
 
-    printk(TAGI "Started!\n");
+    LOGGER(TAGI "Started!\n");
     return 0;
 
     ABORT:
@@ -810,7 +833,7 @@ static void honey_driver_exit(void) {
     int i;
     int cpu_count;
 
-    printk(TAGI "Unloading...\n");
+    LOGGER(TAGI "Unloading...\n");
 
     //XXX this doesn't actually work if you offline random cores in the middle (i.e. offline core 4 of 8) but
     // I'm choosing to ignore that because who offlines a CPU core while fuzzing??
@@ -824,7 +847,7 @@ static void honey_driver_exit(void) {
 
     misc_deregister(&honey_driver_misc_dev);
 
-    printk(TAGI "Unloaded!\n");
+    LOGGER(TAGI "Unloaded!\n");
 }
 
 module_init(honey_driver_init);

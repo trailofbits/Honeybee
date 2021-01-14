@@ -21,9 +21,10 @@ add_library(honey_analyzer STATIC
         honey_analyzer/processor_trace/ha_pt_decoder.h
         honey_analyzer/ha_debug_switch.h
         honey_analyzer/trace_analysis/ha_session_internal.h
+        honey_analyzer/capture/ha_capture_session.c
+        honey_analyzer/capture/ha_capture_session.h
         honeybee_shared/hb_hive.c
-        honeybee_shared/hb_hive.h)
-target_compile_options(honey_analyzer PRIVATE -masm=intel)
+        honeybee_shared/hb_hive.h honey_analyzer/processor_trace/ha_pt_decoder_constants.h honey_analyzer/honey_analyzer.h)
 target_compile_options(honey_analyzer PRIVATE -Ofast)
 
 #For ease of debugging, we don't actually link against honey_analyzer in honey_tester since CMake does not recursively
@@ -38,18 +39,13 @@ add_executable(honey_tester
         honey_analyzer/processor_trace/ha_pt_decoder.c
         honey_analyzer/processor_trace/ha_pt_decoder.h
         honey_analyzer/ha_debug_switch.h
+        honey_analyzer/capture/ha_capture_session.c
+        honey_analyzer/capture/ha_capture_session.h
         honey_analyzer/trace_analysis/ha_session_internal.h
         honeybee_shared/hb_hive.c
-        honeybee_shared/hb_hive.h)
+        honeybee_shared/hb_hive.h honey_analyzer/processor_trace/ha_pt_decoder_constants.h honey_analyzer/honey_analyzer.h)
 target_include_directories(honey_tester PRIVATE ${CMAKE_SOURCE_DIR}/dependencies/libipt/libipt/include)
 target_link_libraries(honey_tester ${CMAKE_SOURCE_DIR}/dependencies/libipt/lib/libipt.a)
 #target_compile_options(honey_tester PRIVATE -Ofast)
-
-project(honey_capture C)
-add_executable(honey_capture
-        honey_capture/main.c honey_capture/main.c
-        honey_capture/main_simplept.c
-        honeybee_shared/hb_driver_packets.h)
-
 #target_compile_options(honey_analyzer PRIVATE -fno-omit-frame-pointer -fsanitize=address)
 #target_link_options(honey_analyzer PRIVATE -fno-omit-frame-pointer -fsanitize=address)

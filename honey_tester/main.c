@@ -14,7 +14,7 @@
 #include <inttypes.h>
 
 #include "../honey_analyzer/processor_trace/ha_pt_decoder.h"
-
+#include "../honey_analyzer/processor_trace/ha_pt_decoder_constants.h"
 #include "../honey_analyzer/trace_analysis/ha_session.h"
 #include "unit_testing/ha_session_audit.h"
 
@@ -100,6 +100,7 @@ int main(int argc, const char * argv[]) {
     /* arguments are valid */
 
     int result = HA_PT_DECODER_NO_ERROR;
+    hb_hive *hive = NULL;
     ha_session_t session = NULL;
     int fd = 0;
     void *trace_map_handle = NULL;
@@ -128,18 +129,24 @@ int main(int argc, const char * argv[]) {
         goto CLEANUP;
     }
 
-    if (!(trace_buffer = malloc(trace_file_size + 1 /* Required for ha_session and ha_decoder */))) {
+    if (!(trace_buffer = malloc(trace_file_size + 1 /* Required for the stop codon */))) {
         printf(TAG "Out of memory\n");
         goto CLEANUP;
     }
     memcpy(trace_buffer, trace_map_handle, trace_file_size);
+    trace_buffer[trace_file_size] = PT_TRACE_END; //terminate the buffer since we're pulling from a file
 
     /* Setup the session */
 
+    if (!(hive = hb_hive_alloc(hive_path))) {
+        printf(TAG "Could not load hive at path %s\n", hive_path);
+        goto CLEANUP;
+    }
+
     uint64_t trace_base_address = slid_load_sideband_address - binary_offset_sideband;
-    if ((result = ha_session_alloc(&session, hive_path)) < 0
-        || (result = ha_session_reconfigure_with_rw_trace_buffer(session, trace_buffer, trace_file_size,
-                                                                 trace_base_address))) {
+    if ((result = ha_session_alloc(&session, hive)) < 0
+        || (result = ha_session_reconfigure_with_terminated_trace_buffer(session, trace_buffer, trace_file_size,
+                                                                         trace_base_address))) {
         printf(TAG "Failed to start session, error=%d\n", result);
         goto CLEANUP;
     }
@@ -173,6 +180,10 @@ int main(int argc, const char * argv[]) {
 
     /* Completed OK, clear the result if there is any */
     CLEANUP:
+    if (hive) {
+        hb_hive_free(hive);
+    }
+
     if (session) {
         ha_session_free(session);
     }
