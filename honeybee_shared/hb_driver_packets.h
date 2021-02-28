@@ -11,7 +11,10 @@
 
 #endif
 
+#ifdef __APPLE__
+#else
 #include <linux/ioctl.h>
+#endif
 
 #define HB_DRIVER_PACKET_IOC_MAGIC 0xab
 
