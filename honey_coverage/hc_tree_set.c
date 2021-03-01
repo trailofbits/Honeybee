@@ -20,13 +20,8 @@ typedef struct internal_hc_tree_set {
     node *root;
 } hc_tree_set;
 
-/**
- * Creates a new tree set
- * @param hash_fcn The function which generates hashes (which are used as tree values). Note that these values should
- * be as close to random as possible for performance
- * @param equals_fcn A function which returns 0 iff the two values are logically identical
- * @return A tree set, if it could be created, else NULL.
- */
+typedef int (internal_iterate_nodes_fcn)(node *n, void *context);
+
 hc_tree_set_t hc_tree_set_alloc(hc_tree_set_hash_fcn *hash_fcn, hc_tree_set_is_equal *equals_fcn) {
     hc_tree_set_t tree_set = calloc(1, sizeof(hc_tree_set));
     if (!tree_set) {
@@ -39,28 +34,66 @@ hc_tree_set_t hc_tree_set_alloc(hc_tree_set_hash_fcn *hash_fcn, hc_tree_set_is_e
     return tree_set;
 }
 
-/**
- * Frees a tree set
- */
-void hc_tree_set_free(hc_tree_set_t tree_set) {
-    //TODO: Recursive free won't work for very large trees
-    abort();
+static int internal_iterate_all_nodes(hc_tree_set_t tree_set, internal_iterate_nodes_fcn iterator, void *context) {
+    /* since the tree has an unbounded size, we use a pseudo stack which we re-alloc as we go */
+    int result = -1;
+    unsigned long long tree_stack_element_count = 1 << 12;
+    node **tree_stack = calloc(sizeof(node *), tree_stack_element_count);
+    if (!tree_stack) {
+        goto CLEANUP;
+    }
+
+    unsigned long long tree_stack_count = 1;
+    tree_stack[0] = tree_set->root;
+    while (tree_stack_count > 0) {
+        //Since we use this function for destroying, we need to grab all references we need before calling the fcn
+        node *n = tree_stack[--tree_stack_count];
+
+        //Make sure we have space to push the two children
+        if (tree_stack_count + 2 >= tree_stack_element_count) {
+            node **new_tree_stack = realloc(tree_stack, sizeof(node *) * tree_stack_element_count * 2);
+            if (!new_tree_stack) {
+                goto CLEANUP;
+            }
+            tree_stack = new_tree_stack;
+            tree_stack_element_count *= 2;
+        }
+
+        if (n->left) {
+            tree_stack[tree_stack_count++] = n->left;
+        }
+
+        if (n->right) {
+            tree_stack[tree_stack_count++] = n->right;
+        }
+
+        /* we've stashed all information from the node, we can now safely hand it to the iterator */
+        if (iterator(n, context)) {
+            //Iterator requested stop
+            goto CLEANUP;
+        }
+    }
+
+    result = 0;
+
+    CLEANUP:
+    free(tree_stack);
+    return result;
 }
 
-/**
- * Returns the number of elements in the set, O(1)
- */
+static int node_free(node *n, void *context) {
+    free(n);
+    return 0;
+}
+
+void hc_tree_set_free(hc_tree_set_t tree_set) {
+    internal_iterate_all_nodes(tree_set, node_free, NULL);
+}
+
 unsigned long long hc_tree_set_count(hc_tree_set_t tree_set) {
     return tree_set->count;
 }
 
-/**
- * Inserts an element into the set
- * Average O(log n)
- * @param tree_set The set to insert into
- * @param element THe element to insert
- * @return 1 if inserted, 0 if already exists, negative on insert error
- */
 int hc_tree_set_insert(hc_tree_set_t tree_set, void *element) {
     hc_tree_set_hash_type element_hash = tree_set->hash_fcn(element);
     node **candidate_ptr = &tree_set->root;
@@ -95,11 +128,6 @@ int hc_tree_set_insert(hc_tree_set_t tree_set, void *element) {
     return 1;
 }
 
-/**
- * Checks if the set contains an elements
- * Average O(log n)
- * @return Non-zero if contained, zero if not contained
- */
 int hc_tree_set_contains(hc_tree_set_t tree_set, void *element) {
     node *candidate = tree_set->root;
     hc_tree_set_hash_type element_hash = tree_set->hash_fcn(element);
@@ -115,4 +143,23 @@ int hc_tree_set_contains(hc_tree_set_t tree_set, void *element) {
     }
 
     return 0;
+}
+
+struct internal_node_extract_value_context {
+    hc_tree_iterator_fcn *iterator_fcn;
+    void *user_context;
+};
+
+static int internal_node_extract_value_iterator(node *n, void *context) {
+    struct internal_node_extract_value_context *ctx_struct = context;
+    return ctx_struct->iterator_fcn(n->element, ctx_struct->user_context);;
+}
+
+int hc_tree_set_iterate_all(hc_tree_set_t tree_set, hc_tree_iterator_fcn iterator_fcn, void *context) {
+    struct internal_node_extract_value_context ctx_struct = {
+            .iterator_fcn = iterator_fcn,
+            .user_context = context,
+    };
+
+    return internal_iterate_all_nodes(tree_set, internal_node_extract_value_iterator, &ctx_struct);
 }

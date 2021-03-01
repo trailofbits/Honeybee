@@ -2,6 +2,10 @@
 // Created by Allison Husain on 2/27/21.
 //
 
+#define _GNU_SOURCE
+#define _POSIX_SOURCE
+
+#include <sys/wait.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <unistd.h>
@@ -14,8 +18,11 @@
 #include <inttypes.h>
 #include <sched.h>
 #include <sys/ptrace.h>
+#include <sys/personality.h>
+
 #include "../honey_analyzer/honey_analyzer.h"
 #include "hc_tree_set.h"
+
 #define TAG "[main] "
 #define TAGE "[!] " TAG
 #define TAGI "[*] " TAG
@@ -29,7 +36,10 @@ typedef struct {
 
 static void coverage_block_reported(ha_session_t session, void *context, uint64_t unslid_ip);
 static hc_tree_set_hash_type hc_uint64_t_hash(void *untyped_block);
+
 static int hc_uint64_t_equals(void *untyped_block_a, void *untyped_block_b);
+
+static int hc_tree_iterate_print(void *element, void *context);
 
 long current_clock() {
     struct timespec tv;
@@ -44,6 +54,14 @@ pid_t spawn_suspended(const char *path, char *const *argv) {
     if (pid == 0) {
         /* child */
         ptrace(PTRACE_TRACEME, 0, 0, 0);
+        //disable ASLR for child
+        int old, rc;
+        old = personality(0xffffffff); /* Fetch old personality. */
+        rc = personality(old | ADDR_NO_RANDOMIZE);
+        if (-1 == rc) {
+            perror("personality");
+        }
+
         //Since we do not use PTRACE_O_TRACEEXEC, this will trigger a SIGTRAP on success
         execv(path, argv);
     } else {
@@ -74,26 +92,38 @@ void pin_process_to_cpu(pid_t pid, int cpu) {
 
 int main(int argc, const char * argv[]) {
     //XXX: Replace this with command line args
-    char *hive_path = "/tmp/a.hive";
-    uint64_t filter_start_address = 0x555555554000;
-    uint64_t filter_stop_address =  0x6fffffffffff;
+    if (argc < 7
+        || strncmp(argv[4], "--", 2) != 0) {
+        printf("Usage: %s <hive path> <filter start> <filter stop> -- <target binary> [target args]\n"
+               "This program outputs a set of all basic blocks and edge hashes visited in the following format:\n"
+               "<block count>\n"
+               "<edge count>\n"
+               "...<block IPs in base 10, one per line>...\n"
+               "...<edge hashes in base 10, one per line>...\n",
+               argv[0]);
+        return 1;
+    }
 
-    int result;
+    const char *hive_path = argv[1];
+    uint64_t filter_start_address = strtoull(argv[2], NULL, 0);
+    uint64_t filter_stop_address = strtoull(argv[3], NULL, 0);
+    const char *target_binary = argv[5];
+    const char **target_args = argv + 5; /* we need to include the target binary in target argv */
+
+    int result = 1;
     hc_coverage_info *coverage_info = NULL;
     ha_session_t session = NULL;
     hb_hive *hive = NULL;
-    ha_capture_session_t capture_session;
+    ha_capture_session_t capture_session = NULL;
 
     if (!(coverage_info = calloc(1, sizeof(hc_coverage_info)))
         || !(coverage_info->block_set = hc_tree_set_alloc(hc_uint64_t_hash, hc_uint64_t_equals))
         || !(coverage_info->edge_set = hc_tree_set_alloc(hc_uint64_t_hash, hc_uint64_t_equals))) {
-        result = 1;
         goto CLEANUP;
     }
 
     if (!(hive = hb_hive_alloc(hive_path))) {
         printf(TAGE "Could not open hive at path %s\n", hive_path);
-        result = 1;
         goto CLEANUP;
     }
 
@@ -101,32 +131,22 @@ int main(int argc, const char * argv[]) {
 
     if ((result = ha_session_alloc(&session, hive)) < 0) {
         printf(TAGE "Could not allocate analysis session, error = %d\n", result);
-        result = 1;
         goto CLEANUP;
     }
 
-//    //XXX: Replace this with live capture
-//    int fd = open("/tmp/o.pt", O_RDONLY);
-//    struct stat st;
-//    fstat(fd, &st);
-//    uint8_t *mmap_buffer = mmap(NULL, st.st_size, PROT_READ, MAP_SHARED, fd, 0);
-//    uint8_t *terminated_buffer = malloc(st.st_size + 1);
-//    memcpy(terminated_buffer, mmap_buffer, st.st_size);
-//    terminated_buffer[st.st_size] = 0x55;
-
     if ((result = ha_capture_session_alloc(&capture_session, 0)) < 0) {
         printf(TAGE "Failed to start capture session on CPU 0, error = %d\n", result);
-        result = 1;
         goto CLEANUP;
     }
 
     if ((result = ha_capture_session_set_global_buffer_size(capture_session, 400, 5)) < 0) {
         printf(TAGE "Failed to configure trace buffers on CPU 0, error = %d\n", result);
-        result = 1;
         goto CLEANUP;
     }
 
-    pid_t pid = spawn_suspended("/tmp/a.out", (char *const *) argv);
+    pid_t pid = spawn_suspended(target_binary, (char *const *) target_args);
+    pin_process_to_cpu(pid, 0);
+//    printf(TAGI "Spawned process %d\n", pid);
 
     ha_capture_session_range_filter filters[4];
     bzero(&filters, sizeof(ha_capture_session_range_filter) * 4);
@@ -135,13 +155,11 @@ int main(int argc, const char * argv[]) {
     filters[0].stop = filter_stop_address;
     if ((result = ha_capture_session_configure_tracing(capture_session, pid, filters)) < 0) {
         printf(TAGE "Failed to configure tracing on CPU 0, error = %d\n", result);
-        result = 1;
         goto CLEANUP;
     }
 
     if ((result = ha_capture_session_set_trace_enable(capture_session, 0x1, 0x1)) < 0) {
         printf(TAGE "Failed to start tracing CPU 0, error = %d\n", result);
-        result = 1;
         goto CLEANUP;
     }
 
@@ -149,13 +167,11 @@ int main(int argc, const char * argv[]) {
 
     if ((result = waitpid(pid, &result, 0) < 0)) {
         printf(TAGE "Failed to wait for process, error = %d\n", result);
-        result = 1;
         goto CLEANUP;
     }
 
     if ((result = ha_capture_session_set_trace_enable(capture_session, 0x0, 0x0)) < 0) {
         printf(TAGE "Failed to stop tracing CPU 0, error = %d\n", result);
-        result = 1;
         goto CLEANUP;
     }
 
@@ -163,7 +179,6 @@ int main(int argc, const char * argv[]) {
     uint64_t buffer_length = 0;
     if ((result = ha_capture_get_trace(capture_session, &terminated_buffer, &buffer_length)) < 0) {
         printf(TAGE "Failed to get trace buffer, error = %d\n", result);
-        result = 1;
         goto CLEANUP;
     }
 
@@ -172,25 +187,62 @@ int main(int argc, const char * argv[]) {
                                                                       buffer_length,
                                                                       filter_start_address)) < 0) {
         printf(TAGE "Failed to reconfigure session, error = %d\n", result);
-        result = 1;
         goto CLEANUP;
     }
 
 
     if ((result = ha_session_decode(session, coverage_block_reported, coverage_info)) < 0
-        && result != - HA_PT_DECODER_END_OF_STREAM) {
+        && result != -HA_PT_DECODER_END_OF_STREAM) {
         printf(TAGE "Decoder error encountered, error = %d\n", result);
-        result = 1;
         goto CLEANUP;
     }
 
-    printf(TAGI "Block count = %llu, edge count = %llu\n",
+    /*
+     * output format:
+     * block set count
+     * edge set count
+     * [[block set elements]]
+     * [[edge set elements ]]
+     */
+
+    printf("%llu\n%llu\n",
            hc_tree_set_count(coverage_info->block_set),
            hc_tree_set_count(coverage_info->edge_set));
+
+    if ((result = hc_tree_set_iterate_all(coverage_info->block_set, hc_tree_iterate_print,
+                                          (void *) hive->uvip_slide)) < 0) {
+        printf(TAGE "Couldn't iterate block set");
+        goto CLEANUP;
+    }
+
+    if ((result = hc_tree_set_iterate_all(coverage_info->edge_set, hc_tree_iterate_print, 0)) < 0) {
+        printf(TAGE "Couldn't iterate edge set");
+        goto CLEANUP;
+    }
 
     result = 0;
 
     CLEANUP:
+    if (coverage_info) {
+        if (coverage_info->block_set) {
+            hc_tree_set_free(coverage_info->block_set);
+        }
+
+        if (coverage_info->edge_set) {
+            hc_tree_set_free(coverage_info->edge_set);
+        }
+
+        free(coverage_info);
+    }
+
+    if (session) {
+        ha_session_free(session);
+    }
+
+    if (capture_session) {
+        ha_capture_session_free(capture_session);
+    }
+
     return result;
 }
 
@@ -237,4 +289,10 @@ static int hc_uint64_t_equals(void *untyped_block_a, void *untyped_block_b) {
     uint64_t b = (uint64_t)untyped_block_b;
 
     return a == b;
+}
+
+static int hc_tree_iterate_print(void *element, void *context) {
+    uint64_t slide = (uint64_t) context;
+    printf("%"PRIu64"\n", ((uint64_t) element) + slide);
+    return 0;
 }
