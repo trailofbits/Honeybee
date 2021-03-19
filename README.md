@@ -67,7 +67,7 @@ cd ../
 #Build user-space
 mkdir cmake_build_debug
 cd cmake_build_debug
-cmake .
+cmake ..
 cmake --build . --target all
 ```
 
