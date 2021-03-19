@@ -56,7 +56,7 @@ This project uses `cmake` for its primary build system. Honeybee also depends up
 
 ### Honeybee user-space components
 
-To build all of Honeybees user-space components, simply execute `cmake --build cmake-build-debug` This will build all targets to the `cmake-build-debug` folder.
+To build all of Honeybees user-space components, create a folder for the output products (`mkdir cmake-build-debug`) and then simply execute `cmake --build cmake-build-debug` This will build all targets to the `cmake-build-debug` folder.
 
 ### Honeybee kernel components
 
