@@ -75,14 +75,22 @@ def get_sorted_traces(trace_dir):
 	trace_paths = [os.path.join(trace_dir, trace) for trace in filter(lambda s: s.endswith(".trace"), os.listdir(trace_dir))]
 	traces = []
 	for trace_path in trace_paths:
-		traces.append(process_trace(trace_path))
+		try:
+			traces.append(process_trace(trace_path))
+		except KeyboardInterrupt:
+			raise
+		except:
+			pass
 	
 	traces = sorted(traces, key=lambda trace: trace.timestamp)
 	
 	return traces
 
 def main():
-	paths = ["/Users/allison/Downloads/coverage_exp1/coverage_dir_honeybee_edges", "/Users/allison/Downloads/coverage_exp2/coverage_dir_fuzz_pcap_honeybee/", "/Users/allison/Downloads/coverage_exp3/coverage_dir_fuzz_pcap_honeybee/", "/Users/allison/Downloads/coverage_exp1/coverage_dir_inst", "/Users/allison/Downloads/coverage_exp2/coverage_dir_fuzz_pcap_inst/", "/Users/allison/Downloads/coverage_exp3/coverage_dir_fuzz_pcap_inst/"]
+#	paths = ["/Users/allison/Downloads/coverage_exp1/coverage_dir_honeybee_edges", "/Users/allison/Downloads/coverage_exp2/coverage_dir_fuzz_pcap_honeybee/", "/Users/allison/Downloads/coverage_exp3/coverage_dir_fuzz_pcap_honeybee/", "/Users/allison/Downloads/coverage_exp1/coverage_dir_inst", "/Users/allison/Downloads/coverage_exp2/coverage_dir_fuzz_pcap_inst/", "/Users/allison/Downloads/coverage_exp3/coverage_dir_fuzz_pcap_inst/"]
+#	paths = ["/Users/allison/Downloads/coverage/coverage_dir_fuzz_pcap_honeybee", "/Users/allison/Downloads/coverage/coverage_dir_fuzz_pcap_inst"]
+	paths = ["/Users/allison/Downloads/coverage/coverage_dir_fuzz_filter_honeybee", "/Users/allison/Downloads/coverage/coverage_dir_fuzz_filter_inst"]
+	
 	runs = [get_sorted_traces(path) for path in paths]
 	trace_start_ts = [run[0].timestamp for run in runs]
 	dt = [report_traces(run) for run in runs]
@@ -99,7 +107,8 @@ def main():
 			else:
 				a = max(len(trace.edges), maps[local_ts][run_i])
 	
-	print("Timestamp (s),Honeybee 1 (edge),Honeybee 2 (edge),Honeybee 3 (edge),Clang SW 1 (edge+block+cmp),Clang SW 2 (edge+block+cmp),Clang SW 3 (edge+block+cmp)")
+#	print("Timestamp (s),Honeybee 1 (edge),Honeybee 2 (edge),Honeybee 3 (edge),Clang SW 1 (edge+block+cmp),Clang SW 2 (edge+block+cmp),Clang SW 3 (edge+block+cmp)")
+	print("Timestamp (s),Honeybee 1 (edge),Clang SW 1 (edge+block+cmp)")
 	last_key = 0
 	for key in sorted(maps):
 		a = maps[key]
