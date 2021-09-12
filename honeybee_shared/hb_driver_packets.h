@@ -10,8 +10,11 @@
 #include <stdint.h>
 
 #endif
-
+#if __APPLE__
+#include <sys/ioctl.h>
+#else
 #include <linux/ioctl.h>
+#endif
 
 #define HB_DRIVER_PACKET_IOC_MAGIC 0xab
 
@@ -91,8 +94,6 @@ typedef struct {
      * The PID to trace. This PID must be running (though it may be suspended).
      * This process should have its own memory space (i.e. already exec'd) since this PID is exchanged for a CR3
      * value internally.
-     *
-     * Note: this field is overwritten in the kernel copy of the structure with the UCR3 value
      */
     uint64_t pid;
 } hb_driver_packet_configure_trace;

@@ -113,12 +113,6 @@ static uint8_t topa_page_order;
 static uint8_t address_range_filter_count;
 
 /**
- * This is used by the read_msr_on_cpu SMP function since there's no way to return from an SMP routine
- */
-static uint64_t temp_msr_read_result;
-static int temp_msr_read_return_code;
-
-/**
  * Virtual address of the ToPA table for this CPU
  */
 static DEFINE_PER_CPU(uint64_t
@@ -339,6 +333,26 @@ static unsigned int get_topa_entry_count(int cpu) {
 }
 
 /**
+ * Internal cross-CPU structure meant to handle configuring PT on a CPU core
+ */
+struct confiugre_pt {
+    /**
+     * The CPU this configuration should be applied to
+     */
+    uint16_t cpu_id;
+
+    /**
+     * The filters to apply. Note, only the first n filters will be applied (where n is the number of supported filters)
+     */
+    hb_driver_packet_range_filter filters[HB_DRIVER_PACKET_CONFIGURE_TRACE_FILTER_COUNT];
+
+    /**
+     * The CR3 value (i.e. memory space) to hinge tracing on
+     */
+    uint64_t cr3;
+};
+
+/**
  * Configures PT on the current CPU using a configuration struct. Use SMP to call this.
  * Sets a flag in __this_cpu(trace_state) >0x1 if there was an error configuring PT
  *
@@ -346,13 +360,13 @@ static unsigned int get_topa_entry_count(int cpu) {
  */
 static void configure_pt_on_this_cpu(void *arg) {
     uint64_t ctl;
-    hb_driver_packet_configure_trace *configure_trace;
+    struct confiugre_pt *configure_pt;
     int filter_apply_count;
     int i;
     int status;
 
     status = HB_DRIVER_TRACE_STATUS_CONFIGURATION_WRITE_ERROR;
-    configure_trace = arg;
+    configure_pt = arg;
 
     if (rdmsrl_safe(MSR_IA32_RTIT_CTL, &ctl)) {
         goto EXIT;
@@ -378,14 +392,14 @@ static void configure_pt_on_this_cpu(void *arg) {
 
     //configure_pt_on_cpu stuffed this with the cr3. If it is zero, however, that indicates that cr3 filtering is
     // disabled
-    if (configure_trace->pid) {
+    if (configure_pt->cr3) {
         ctl |= CR3_FILTER;
 
         if (IS_ENABLED(CONFIG_PAGE_TABLE_ISOLATION) && static_cpu_has(X86_FEATURE_PTI)) {
-            configure_trace->pid |= 1 << PAGE_SHIFT;
+            configure_pt->cr3 |= 1 << PAGE_SHIFT;
         }
     }
-    if (wrmsrl_safe(MSR_IA32_CR3_MATCH, configure_trace->pid)) {
+    if (wrmsrl_safe(MSR_IA32_CR3_MATCH, configure_pt->cr3)) {
         goto EXIT;
     }
 
@@ -397,7 +411,7 @@ static void configure_pt_on_this_cpu(void *arg) {
 
     //We only apply the first n supported filters
     for (i = 0; i < filter_apply_count; i++) {
-        hb_driver_packet_range_filter *filter = &configure_trace->filters[i];
+        hb_driver_packet_range_filter *filter = configure_pt->filters + i;
         if (filter->enabled) {
             ctl |= 1LLU /* filter */ << ADDRn_SHIFT(i);
             if (wrmsrl_safe(MSR_IA32_ADDRn_START(i), filter->start_address)
@@ -426,21 +440,22 @@ static void configure_pt_on_this_cpu(void *arg) {
  * @return Negative on error
  */
 static int configure_pt_on_cpu(int cpu, hb_driver_packet_configure_trace *configure_trace) {
-    int result;
-    uint64_t ucr3;
+    int result = 0
+    uint64_t cr3 = 0;
+    struct confiugre_pt configure_pt;
 
     if (configure_trace->pid) {
-        if (!(ucr3 = pid_to_cr3((int) configure_trace->pid))) {
+        if (!(cr3 = pid_to_cr3((int) configure_trace->pid))) {
             return -ESRCH;
         }
     }
 
-    //We stash the UCR3 value in the configure_trace structure. This is explained in the header but this is really
-    // just an ugly hack since we don't want to create a second structure to pass it. Additionally, if no PID was
-    // sent (i.e. pid=0), we pass that through to signal that CR3 filtering should not be enabled.
-    configure_trace->pid = ucr3;
+    configure_pt.cpu_id = configure_trace->cpu_id;
+    configure_pt.filters = configure_trace->filters;
+    //If no PID was provided, cr3 is 0. This indicates no CR3/no memory filtering
+    configure_pt.cr3 = ucr3;
 
-    if ((result = smp_do_on_cpu(cpu, configure_pt_on_this_cpu, configure_trace))) {
+    if ((result = smp_do_on_cpu(cpu, configure_pt_on_this_cpu, &configure_pt))) {
         return result;
     }
 
@@ -476,21 +491,48 @@ static void set_pt_enable_on_this_cpu(void *arg) {
 }
 
 /**
- * Reads a given MSR safely into temp_msr_read_result and temp_msr_read_return_code
+ * Internal cross-CPU structure for reading an MSR
+ */
+struct read_msr {
+    /**
+     * The MSR to read
+     */
+    uint32_t msr;
+
+    /**
+     * The error code of reading the MSR
+     */
+    int msr_read_return_code;
+
+    /**
+     * The value read from the MSR, if msr_read_return_code is zero
+     */
+    uint64_t result;
+};
+
+/**
+ * Reads a given MSR safely into the provided struct read_msr *
  */
 static void read_msr_on_this_cpu(void *arg) {
-    uint32_t msr = (uint32_t) (uint64_t) arg;
-    temp_msr_read_return_code = rdmsrl_safe(msr, &temp_msr_read_result);
+    struct read_msr *read_msr = arg;
+    read_msr->msr_read_return_code = rdmsrl_safe(read_msr->msr, &read_msr->result);
 }
 
 /**
  * Reads an MSR from a specific CPU and returns the result
- * Warning: This is a race-y function. Do not call multiple concurrently.
  */
 static int read_msr_on_cpu(int cpu, uint32_t msr, uint64_t *result) {
-    smp_do_on_cpu(cpu, read_msr_on_this_cpu, (void *) (uint64_t) msr);
-    *result = temp_msr_read_result;
-    return temp_msr_read_return_code;
+    //Create the read request structure
+    struct read_msr read_msr = {
+            .msr = msr,
+            .msr_read_return_code = 0,
+            .result = 0,
+    };
+
+    smp_do_on_cpu(cpu, read_msr_on_this_cpu, &read_msr);
+
+    *result = read_msr.result;
+    return read_msr.msr_read_return_code;
 }
 
 /**
