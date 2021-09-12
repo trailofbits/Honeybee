@@ -173,9 +173,13 @@ static inline bool ovf_handler(ha_pt_decoder_t decoder) {
     return true;
 }
 
-static inline uint8_t asm_bsr(uint64_t x){
+static inline uint8_t asm_bsr(uint64_t x) {
+#if __APPLE__
+    return __builtin_clz(x) ^ 31;
+#else
     asm ("bsrq %0, %0" : "=r" (x) : "0" (x));
     return x;
+#endif
 }
 
 static inline bool append_tnt_cache(ha_pt_decoder_t decoder, uint8_t data) {

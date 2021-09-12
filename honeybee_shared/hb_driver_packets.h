@@ -6,11 +6,10 @@
 #define HONEY_DRIVER_HB_DRIVER_PACKETS_H
 
 #ifndef __KERNEL__
-
 #include <stdint.h>
-
 #endif
-#if __APPLE__
+
+#ifdef __APPLE__
 #include <sys/ioctl.h>
 #else
 #include <linux/ioctl.h>

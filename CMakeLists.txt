@@ -49,3 +49,9 @@ target_link_libraries(honey_tester ${CMAKE_SOURCE_DIR}/dependencies/libipt/lib/l
 target_compile_options(honey_tester PRIVATE -Ofast)
 #target_compile_options(honey_analyzer PRIVATE -fno-omit-frame-pointer -fsanitize=address)
 #target_link_options(honey_analyzer PRIVATE -fno-omit-frame-pointer -fsanitize=address)
+
+project(honey_coverage C)
+add_executable(honey_coverage honey_coverage/main.c honey_coverage/hc_tree_set.c honey_coverage/hc_tree_set.h)
+target_link_libraries(honey_coverage honey_analyzer)
+target_compile_options(honey_coverage PRIVATE -Ofast)
+
