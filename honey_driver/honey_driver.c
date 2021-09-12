@@ -440,7 +440,7 @@ static void configure_pt_on_this_cpu(void *arg) {
  * @return Negative on error
  */
 static int configure_pt_on_cpu(int cpu, hb_driver_packet_configure_trace *configure_trace) {
-    int result = 0
+    int result = 0;
     uint64_t cr3 = 0;
     struct confiugre_pt configure_pt;
 
@@ -451,9 +451,9 @@ static int configure_pt_on_cpu(int cpu, hb_driver_packet_configure_trace *config
     }
 
     configure_pt.cpu_id = configure_trace->cpu_id;
-    configure_pt.filters = configure_trace->filters;
+    memcpy(&configure_pt.filters, configure_trace->filters, sizeof(configure_pt.filters));
     //If no PID was provided, cr3 is 0. This indicates no CR3/no memory filtering
-    configure_pt.cr3 = ucr3;
+    configure_pt.cr3 = cr3;
 
     if ((result = smp_do_on_cpu(cpu, configure_pt_on_this_cpu, &configure_pt))) {
         return result;
