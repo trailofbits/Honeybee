@@ -1,0 +1,20 @@
+[package]
+name = "rust-honey_analyzer"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+# [profile.release]
+# debug = true
+
+[dependencies]
+rust-honey_analyzer-sys = { path = "../rust-honey_analyzer-sys" }
+libc = "0.2.117"
+nix = "0.23.1"
+clap = {version = "3.0.14", features = ["cargo"]}
+parse_int = "0.6.0"
+spawn-ptrace = "0.1.2"
+time = "0.3.7"
+itertools = "0.10.3"
+datasize = "0.2.10"
+residua-uleb128 = "0.2.0"

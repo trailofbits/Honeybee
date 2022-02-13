@@ -191,3 +191,9 @@ DerivedData/
 # End of https://www.toptal.com/developers/gitignore/api/macos,linux,clion+all,xcode,cmake
 
 !honey_driver/Makefile
+
+# VSCode Local history plugin
+/.history/
+
+# VSCode
+/.vscode/
