@@ -538,14 +538,14 @@ int ha_pt_decoder_decode_until_caches_filled(ha_pt_decoder_t decoder) {
         case __extension__ 0b11000011:    /* MNT -- ignoring because I also don't know what this is */
         case __extension__ 0b01110011:    /* TMA -- ignoring because we don't support time */
         default:
-            return -HA_PT_UNSUPPORTED_TRACE_PACKET;
+            return -HA_PT_DECODER_UNSUPPORTED_TRACE_PACKET;
     }
 
     handle_pt_mtc: /* ignoring because we don't support time */
     handle_pt_tsc: /* ignoring because we don't support time */
     handle_pt_cyc: /* ignoring because we don't support time */
     handle_pt_error: /* just an error */
-        return -HA_PT_UNSUPPORTED_TRACE_PACKET;
+        return -HA_PT_DECODER_UNSUPPORTED_TRACE_PACKET;
 
     handle_pt_exit:
         //We hit the stop codon

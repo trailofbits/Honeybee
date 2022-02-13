@@ -57,7 +57,7 @@ int ha_capture_session_set_global_buffer_size(ha_capture_session_t session, uint
 /**
  * Starts or stops tracing on this session's CPU
  * @param enabled Non-zero if tracing should be enabled
- * @param If the trace buffer output should be reset to the start. If false and the trace has not been reconfigured
+ * @param reset_output If the trace buffer output should be reset to the start. If false and the trace has not been reconfigured
  * since being disabled, tracing will resume without damaging data.
  * @return A status code. Negative on error.
  */
@@ -72,7 +72,7 @@ int ha_capture_session_set_trace_enable(ha_capture_session_t session, uint8_t en
  * @return A status code. Negative on error.
  */
 int ha_capture_session_configure_tracing(ha_capture_session_t session, uint32_t pid,
-                                         ha_capture_session_range_filter filters[4]);
+                                         const ha_capture_session_range_filter filters[4]);
 
 /**
  * Gets the trace buffer. This trace buffer has a stop codon (PT_TRACE_END) at the end of it.
@@ -82,6 +82,6 @@ int ha_capture_session_configure_tracing(ha_capture_session_t session, uint32_t 
  * @param trace_length The location to place the length of the trace and the stop codon. Nothing is written on error.
  * @return A status code. Negative on error.
  */
-int ha_capture_get_trace(ha_capture_session_t session, uint8_t **trace_buffer, uint64_t *trace_length);
+int ha_capture_session_get_trace(ha_capture_session_t session, uint8_t **trace_buffer, uint64_t *trace_length);
 
 #endif //HA_CAPTURE_SESSION_H

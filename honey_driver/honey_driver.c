@@ -77,7 +77,7 @@
 #define ENABLE_LOGGING 0
 
 #if ENABLE_LOGGING
-#define LOGGER(format, ...) (printf("[" __FILE__ "] " format, ##__VA_ARGS__))
+#define LOGGER(format, ...) (printk(format, ##__VA_ARGS__))
 #else
 #define LOGGER(format, ...)  (void)0
 #endif

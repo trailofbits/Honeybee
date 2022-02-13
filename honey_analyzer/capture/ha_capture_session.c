@@ -101,7 +101,7 @@ int ha_capture_session_set_trace_enable(ha_capture_session_t session, uint8_t en
 }
 
 int ha_capture_session_configure_tracing(ha_capture_session_t session, uint32_t pid,
-                                         ha_capture_session_range_filter filters[4]) {
+                                         const ha_capture_session_range_filter filters[4]) {
     hb_driver_packet_configure_trace configure_trace;
 //    bzero(&configure_trace, sizeof configure_trace);
 
@@ -110,7 +110,7 @@ int ha_capture_session_configure_tracing(ha_capture_session_t session, uint32_t 
 
     for (int i = 0; i < 4; i++) {
         hb_driver_packet_range_filter *dst_filter = &configure_trace.filters[i];
-        ha_capture_session_range_filter *src_filter = &filters[i];
+        const ha_capture_session_range_filter *src_filter = &filters[i];
         dst_filter->enabled = src_filter->enabled;
         dst_filter->start_address = src_filter->start;
         dst_filter->stop_address = src_filter->stop;
@@ -130,7 +130,7 @@ static int get_trace_buffer_lengths(ha_capture_session_t session, uint64_t *pack
     return ioctl(session->fd, HB_DRIVER_PACKET_IOC_GET_TRACE_LENGTHS, &get_trace_lengths);
 }
 
-int ha_capture_get_trace(ha_capture_session_t session, uint8_t **trace_buffer, uint64_t *trace_length) {
+int ha_capture_session_get_trace(ha_capture_session_t session, uint8_t **trace_buffer, uint64_t *trace_length) {
     int result;
 
     uint64_t packet_byte_count;
