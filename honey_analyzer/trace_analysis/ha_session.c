@@ -117,7 +117,7 @@ int64_t block_decode(ha_session_t session) {
 #endif
 
         if (LO32(index) >= session->hive->block_count) {
-            ANALYSIS_LOGGER("\tNo map error, index = %"PRIu32", block count = %"PRIu64"\n", LO32(index),
+            ANALYSIS_LOGGER("\tNo map error, index = %"PRIx32", block count = %"PRIx64"\n", LO32(index),
                             session->hive->block_count);
             return -HA_PT_DECODER_NO_MAP;
         }

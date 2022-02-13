@@ -27,7 +27,7 @@ typedef enum {
      */
     HA_PT_DECODER_TRACE_DESYNC = 4,
     /** An unsupported packet was found in the PT stream. */
-    HA_PT_UNSUPPORTED_TRACE_PACKET = 5,
+    HA_PT_DECODER_UNSUPPORTED_TRACE_PACKET = 5,
     /** The target address was not found in the binary map. */
     HA_PT_DECODER_NO_MAP = 6,
 } ha_pt_decoder_status;

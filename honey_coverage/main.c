@@ -77,7 +77,7 @@ void suspend_process(pid_t pid) {
     ptrace(PTRACE_INTERRUPT, pid, (caddr_t) 1, 0);
 }
 
-void unsuspended_process(pid_t pid) {
+void unsuspend_process(pid_t pid) {
     ptrace(PTRACE_CONT, pid, (caddr_t) 1, 0);
 }
 
@@ -163,7 +163,7 @@ int main(int argc, const char * argv[]) {
         goto CLEANUP;
     }
 
-    unsuspended_process(pid);
+    unsuspend_process(pid);
 
     if ((result = waitpid(pid, &result, 0) < 0)) {
         printf(TAGE "Failed to wait for process, error = %d\n", result);
@@ -177,7 +177,7 @@ int main(int argc, const char * argv[]) {
 
     uint8_t *terminated_buffer = NULL;
     uint64_t buffer_length = 0;
-    if ((result = ha_capture_get_trace(capture_session, &terminated_buffer, &buffer_length)) < 0) {
+    if ((result = ha_capture_session_get_trace(capture_session, &terminated_buffer, &buffer_length)) < 0) {
         printf(TAGE "Failed to get trace buffer, error = %d\n", result);
         goto CLEANUP;
     }
