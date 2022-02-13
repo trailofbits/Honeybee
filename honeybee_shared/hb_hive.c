@@ -39,7 +39,7 @@ hb_hive *hb_hive_alloc(const char *hive_path) {
         goto CLEANUP;
     }
 
-    map_handle = mmap(NULL, sb.st_size, PROT_READ, MAP_SHARED, fd, 0);
+    map_handle = mmap(NULL, sb.st_size, PROT_READ, MAP_PRIVATE | MAP_POPULATE, fd, 0);
     if (map_handle == MAP_FAILED) {
         printf(TAG "Could not mmap file '%s'!\n", hive_path);
         goto CLEANUP;

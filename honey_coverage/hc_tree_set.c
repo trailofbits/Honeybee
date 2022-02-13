@@ -42,6 +42,10 @@ static int internal_iterate_all_nodes(hc_tree_set_t tree_set, internal_iterate_n
     if (!tree_stack) {
         goto CLEANUP;
     }
+    if (!tree_set->root) {
+        result = 0;
+        goto CLEANUP;
+    }
 
     unsigned long long tree_stack_count = 1;
     tree_stack[0] = tree_set->root;
